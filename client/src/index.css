@@ -1,0 +1,234 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(228, 18%, 11%);
+  --foreground: hsl(0, 0%, 100%);
+  --card: hsl(228, 15%, 13%);
+  --card-foreground: hsl(0, 0%, 100%);
+  --popover: hsl(228, 15%, 13%);
+  --popover-foreground: hsl(0, 0%, 100%);
+  --primary: hsl(162, 100%, 42%);
+  --primary-foreground: hsl(228, 18%, 11%);
+  --secondary: hsl(228, 15%, 13%);
+  --secondary-foreground: hsl(0, 0%, 100%);
+  --muted: hsl(228, 12%, 16%);
+  --muted-foreground: hsl(0, 0%, 55%);
+  --accent: hsl(228, 12%, 16%);
+  --accent-foreground: hsl(162, 100%, 42%);
+  --destructive: hsl(4, 86%, 69%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(228, 12%, 23%);
+  --input: hsl(228, 12%, 16%);
+  --ring: hsl(162, 100%, 42%);
+  --chart-1: hsl(162, 100%, 42%);
+  --chart-2: hsl(159, 100%, 36%);
+  --chart-3: hsl(42, 93%, 56%);
+  --chart-4: hsl(147, 78%, 42%);
+  --chart-5: hsl(341, 75%, 51%);
+  --radius: 0.5rem;
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  
+  /* HyperEVM specific colors */
+  --hyper-dark: hsl(228, 18%, 11%);
+  --hyper-teal: hsl(162, 100%, 42%);
+  --hyper-red: hsl(4, 86%, 69%);
+  --hyper-green: hsl(179, 54%, 63%);
+  --hyper-grey: hsl(0, 0%, 55%);
+  --hyper-dark-lighter: hsl(228, 15%, 18%);
+  --hyper-dark-border: hsl(228, 12%, 23%);
+}
+
+.dark {
+  --background: hsl(228, 18%, 11%);
+  --foreground: hsl(0, 0%, 100%);
+  --card: hsl(228, 15%, 13%);
+  --card-foreground: hsl(0, 0%, 100%);
+  --popover: hsl(228, 15%, 13%);
+  --popover-foreground: hsl(0, 0%, 100%);
+  --primary: hsl(162, 100%, 42%);
+  --primary-foreground: hsl(228, 18%, 11%);
+  --secondary: hsl(228, 15%, 13%);
+  --secondary-foreground: hsl(0, 0%, 100%);
+  --muted: hsl(228, 12%, 16%);
+  --muted-foreground: hsl(0, 0%, 55%);
+  --accent: hsl(228, 12%, 16%);
+  --accent-foreground: hsl(162, 100%, 42%);
+  --destructive: hsl(4, 86%, 69%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(228, 12%, 23%);
+  --input: hsl(228, 12%, 16%);
+  --ring: hsl(162, 100%, 42%);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-color: var(--hyper-dark);
+    color: white;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border rounded-sm;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-accent-foreground;
+  }
+
+  /* Form elements */
+  input, textarea, select {
+    @apply bg-input border-border text-foreground;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    @apply border-primary ring-2 outline-none;
+    ring-color: rgba(0, 212, 170, 0.5);
+  }
+
+  /* Code blocks */
+  code {
+    @apply font-mono text-sm bg-muted px-1 py-0.5 rounded;
+  }
+
+  pre {
+    @apply font-mono text-sm bg-muted p-4 rounded-lg overflow-x-auto;
+  }
+
+  /* Custom utilities */
+  .hyper-gradient {
+    background: linear-gradient(135deg, var(--hyper-dark) 0%, var(--hyper-dark-lighter) 100%);
+  }
+
+  .hyper-glow {
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.3);
+  }
+
+  .hyper-border {
+    border-color: var(--hyper-dark-border);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  .text-hyper-teal {
+    color: var(--hyper-teal);
+  }
+
+  .text-hyper-red {
+    color: var(--hyper-red);
+  }
+
+  .text-hyper-green {
+    color: var(--hyper-green);
+  }
+
+  .text-hyper-grey {
+    color: var(--hyper-grey);
+  }
+
+  .bg-hyper-dark {
+    background-color: var(--hyper-dark);
+  }
+
+  .bg-hyper-dark-lighter {
+    background-color: var(--hyper-dark-lighter);
+  }
+
+  .bg-hyper-teal {
+    background-color: var(--hyper-teal);
+  }
+
+  .border-hyper-dark-border {
+    border-color: var(--hyper-dark-border);
+  }
+
+  .border-hyper-teal {
+    border-color: var(--hyper-teal);
+  }
+
+  .border-hyper-green {
+    border-color: var(--hyper-green);
+  }
+
+  .border-hyper-red {
+    border-color: var(--hyper-red);
+  }
+}
+
+@layer components {
+  .metric-card {
+    @apply bg-hyper-dark-lighter rounded-xl border border-hyper-dark-border p-6 transition-all hover:border-hyper-teal;
+  }
+
+  .code-block {
+    @apply bg-hyper-dark border border-hyper-dark-border rounded-lg p-4 font-mono text-sm;
+  }
+
+  .status-indicator {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .status-online {
+    @apply bg-hyper-green;
+  }
+
+  .status-offline {
+    @apply bg-hyper-red;
+  }
+
+  .status-warning {
+    @apply bg-yellow-500;
+  }
+
+  .nav-item {
+    @apply w-full text-left px-3 py-2 rounded-lg transition-colors flex items-center space-x-3;
+  }
+
+  .nav-item.active {
+    @apply bg-hyper-teal text-hyper-dark border border-hyper-teal;
+    background-color: rgba(0, 212, 170, 0.2);
+    border-color: rgba(0, 212, 170, 0.3);
+  }
+
+  .nav-item:not(.active) {
+    @apply hover:bg-hyper-dark-border text-hyper-grey hover:text-white;
+  }
+
+  .simulation-trace-item {
+    @apply bg-hyper-dark rounded-lg p-4 border border-hyper-dark-border;
+  }
+
+  .trace-badge {
+    @apply text-xs px-2 py-1 rounded font-mono;
+  }
+
+  .trace-badge.call {
+    @apply bg-hyper-teal text-hyper-dark;
+  }
+
+  .trace-badge.return {
+    @apply bg-hyper-green text-hyper-dark;
+  }
+
+  .trace-badge.revert {
+    @apply bg-hyper-red text-white;
+  }
+}
