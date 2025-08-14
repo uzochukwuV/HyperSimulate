@@ -237,5 +237,211 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enhanced simulation endpoints with advanced features
+  
+  // Simulate transaction with state overrides
+  app.post("/api/v1/simulate/advanced", async (req, res) => {
+    try {
+      const request = req.body;
+      
+      // Add request ID if not provided
+      if (!request.requestId) {
+        request.requestId = `sim-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      }
+      
+      const result = await simulationService.simulateWithStateOverrides(request);
+      
+      broadcast({
+        type: 'advanced_simulation_complete',
+        data: {
+          requestId: request.requestId,
+          result
+        }
+      });
+
+      res.json({
+        success: true,
+        requestId: request.requestId,
+        result
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Advanced simulation failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Bundle simulation with dependency analysis
+  app.post("/api/v1/simulate/bundle", async (req, res) => {
+    try {
+      const bundleRequest = req.body;
+      const bundleResult = await simulationService.simulateBundle(bundleRequest);
+      
+      broadcast({
+        type: 'bundle_simulation_complete',
+        data: {
+          bundleHash: bundleResult.bundleHash,
+          results: bundleResult.results
+        }
+      });
+
+      res.json({
+        success: true,
+        data: bundleResult
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Bundle simulation failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get HyperEVM precompile information
+  app.get("/api/v1/hyperevm/precompiles", async (req, res) => {
+    try {
+      const precompiles = await simulationService.getPrecompileInfo();
+      res.json({
+        success: true,
+        precompiles
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch precompile information",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get simulation statistics and performance metrics
+  app.get("/api/v1/simulation/stats", async (req, res) => {
+    try {
+      const stats = await simulationService.getSimulationStats();
+      res.json({
+        success: true,
+        stats
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch simulation statistics",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get cached simulation by request ID
+  app.get("/api/v1/simulation/cache/:requestId", async (req, res) => {
+    try {
+      const { requestId } = req.params;
+      const cachedResult = simulationService.getCachedSimulation(requestId);
+      
+      if (!cachedResult) {
+        return res.status(404).json({
+          success: false,
+          error: "Simulation not found in cache"
+        });
+      }
+
+      res.json({
+        success: true,
+        result: cachedResult
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch cached simulation",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Clear simulation cache (admin endpoint)
+  app.post("/api/admin/cache/clear", async (req, res) => {
+    try {
+      simulationService.clearCache();
+      res.json({
+        success: true,
+        message: "Simulation cache cleared successfully"
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to clear cache",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // JSON-RPC endpoint for EVM compatibility
+  app.post("/rpc", async (req, res) => {
+    const { method, params, id } = req.body;
+    
+    try {
+      let result;
+      
+      switch (method) {
+        case 'eth_call':
+          // Handle eth_call requests
+          if (!params || params.length < 1) {
+            throw new Error('Missing transaction parameters');
+          }
+          // This would need to be implemented with actual RPC call
+          result = await hyperliquidService.call(params[0], params[1] || 'latest');
+          break;
+          
+        case 'eth_estimateGas':
+          // Handle gas estimation
+          if (!params || params.length < 1) {
+            throw new Error('Missing transaction parameters');
+          }
+          result = await hyperliquidService.estimateGas(params[0]);
+          break;
+          
+        case 'hyperevm_simulate':
+          // Custom HyperEVM simulation endpoint
+          if (!params || params.length < 1) {
+            throw new Error('Missing simulation parameters');
+          }
+          const simResult = await simulationService.simulateTransaction({
+            transaction: params[0],
+            blockNumber: params[1] || 'latest',
+            enableStateOverrides: false,
+            simulationMode: 'fast',
+            includePrecompiles: true,
+            simulateCoreWriter: false,
+          });
+          result = {
+            success: simResult.success,
+            gasUsed: `0x${simResult.gasUsed.toString(16)}`,
+            returnValue: simResult.returnValue,
+            executionTrace: simResult.executionTrace
+          };
+          break;
+          
+        case 'hyperevm_getPrecompiles':
+          // Get HyperEVM precompiles
+          result = await simulationService.getPrecompileInfo();
+          break;
+          
+        default:
+          throw new Error(`Method ${method} not supported`);
+      }
+      
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        result
+      });
+    } catch (error) {
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32000,
+          message: error instanceof Error ? error.message : 'Unknown error'
+        }
+      });
+    }
+  });
+
   return httpServer;
 }

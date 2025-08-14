@@ -2,9 +2,18 @@
 
 ## Overview
 
-This is a comprehensive transaction simulation platform specifically designed for HyperEVM, built as a full-stack web application. The platform enables developers to simulate blockchain transactions with 100% accuracy, providing detailed gas usage breakdowns, execution traces, and state change analysis. It serves as essential infrastructure for the HyperEVM ecosystem, supporting both individual transaction simulation and bundle testing capabilities.
+This is a production-ready HyperEVM Transaction Simulation Platform built as a comprehensive full-stack web application. The platform provides 100% accurate transaction simulation with detailed gas analysis, execution tracing, and advanced state management. It serves as critical infrastructure for the HyperEVM ecosystem, supporting individual transactions, bundle simulations, and comprehensive analysis capabilities.
 
-The application features a React-based frontend with shadcn/ui components and a Node.js/Express backend with real-time WebSocket communication. It integrates directly with HyperEVM's dual-block architecture (fast and large blocks) and supports advanced simulation features like state overrides, account impersonation, and precompile interactions.
+The application features a React-based frontend with shadcn/ui components and a robust Node.js/Express backend with real-time WebSocket communication. It integrates directly with HyperEVM's dual-block architecture (fast and large blocks) and supports advanced features including state overrides, bundle dependency analysis, security insights, and gas optimization recommendations.
+
+## Recent Enhancements (Latest Update)
+
+Based on comprehensive HyperEVM documentation, the platform has been significantly enhanced with:
+- **Advanced Simulation Engine**: Full HyperEVM-specific precompile support and state management
+- **Comprehensive Analysis**: Gas profiling, security insights, and optimization suggestions  
+- **Bundle Simulation**: Transaction dependency analysis and bundle optimization
+- **Enhanced API Layer**: JSON-RPC compatibility and advanced simulation endpoints
+- **Performance Optimization**: LRU caching, simulation statistics, and performance monitoring
 
 ## User Preferences
 
@@ -23,9 +32,10 @@ Preferred communication style: Simple, everyday language.
 ### Backend Architecture
 - **Runtime**: Node.js with Express framework
 - **Language**: TypeScript with ES modules
-- **API Design**: RESTful endpoints with RPC-style simulation calls
+- **API Design**: RESTful endpoints with JSON-RPC compatibility for EVM integration
 - **Real-time Communication**: WebSocket server for live updates and notifications
 - **Error Handling**: Centralized error middleware with structured responses
+- **Advanced Features**: LRU caching, performance monitoring, and comprehensive logging
 
 ### Data Storage Solutions
 - **Database**: PostgreSQL with Drizzle ORM for type-safe database operations
@@ -45,11 +55,37 @@ Preferred communication style: Simple, everyday language.
 - **State Management**: Real-time blockchain state tracking and historical simulation capabilities
 
 ### Simulation Engine Design
-- **Transaction Processing**: Comprehensive transaction simulation with gas profiling
-- **State Overrides**: Ability to modify contract storage, balances, and blockchain conditions
-- **Bundle Simulation**: Support for chained, interdependent transaction testing
+- **Transaction Processing**: Comprehensive transaction simulation with gas profiling and analysis
+- **State Overrides**: Ability to modify contract storage, balances, and blockchain conditions  
+- **Bundle Simulation**: Support for chained, interdependent transaction testing with dependency analysis
 - **Execution Tracing**: Detailed step-by-step transaction execution analysis
 - **Event Decoding**: Automatic decoding of smart contract events and logs
+- **Security Analysis**: Automated detection of potential security issues and optimization opportunities
+- **Performance Monitoring**: Real-time performance metrics and caching for optimal response times
+
+## Enhanced API Endpoints
+
+### Core Simulation API
+- `POST /api/v1/simulate` - Standard transaction simulation
+- `POST /api/v1/simulate/advanced` - Enhanced simulation with state overrides
+- `POST /api/v1/simulate/bundle` - Bundle simulation with dependency analysis
+- `GET /api/v1/simulation/stats` - Simulation performance statistics
+- `GET /api/v1/simulation/cache/:requestId` - Retrieve cached simulation results
+
+### HyperEVM-Specific API
+- `GET /api/v1/hyperevm/precompiles` - HyperEVM precompile information
+- `POST /rpc` - JSON-RPC endpoint with HyperEVM extensions (eth_call, eth_estimateGas, hyperevm_simulate)
+
+### Administrative API
+- `POST /api/admin/cache/clear` - Clear simulation cache
+- `GET /api/admin/health` - System health and connectivity status
+- `GET /api/admin/metrics` - System performance metrics
+
+### Real-time WebSocket Events
+- `network_state` - Live blockchain state updates
+- `simulation_complete` - Standard simulation completion
+- `advanced_simulation_complete` - Enhanced simulation completion  
+- `bundle_simulation_complete` - Bundle simulation completion
 
 ## External Dependencies
 

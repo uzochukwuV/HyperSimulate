@@ -1,0 +1,1916 @@
+# HyperEVM Transaction Simulation Platform
+## Complete TypeScript Implementation Guide
+
+### Table of Contents
+1. [Project Overview](#project-overview)
+2. [Architecture Design](#architecture-design)
+3. [Technology Stack](#technology-stack)
+4. [Core Components](#core-components)
+5. [Implementation Guide](#implementation-guide)
+6. [API Documentation](#api-documentation)
+7. [Testing Strategy](#testing-strategy)
+8. [Deployment](#deployment)
+9. [Performance Optimization](#performance-optimization)
+10. [Monitoring & Analytics](#monitoring--analytics)
+
+---
+
+## Project Overview
+
+The HyperEVM Transaction Simulation Platform is a comprehensive infrastructure tool designed specifically for the HyperEVM ecosystem. Based on research, HyperEVM is part of Hyperliquid's execution layer, inheriting security from HyperBFT consensus with HYPE as the native gas token.
+
+### Key Features
+- **100% Accurate Simulation**: Real-time gas usage breakdown and execution results
+- **State Management**: Current and historical blockchain state simulation
+- **Advanced Testing**: Bundle simulations, state overrides, and account impersonation
+- **HyperEVM Integration**: Native support for HyperEVM-specific features
+- **Developer Tools**: Comprehensive APIs, SDKs, and documentation
+
+---
+
+## Architecture Design
+
+### System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend Layer                           │
+├─────────────────────────────────────────────────────────────┤
+│  Web Dashboard  │  Transaction Builder  │  Results Viewer   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                      API Gateway                            │
+├─────────────────────────────────────────────────────────────┤
+│     REST API      │      RPC API       │    WebSocket API   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                   Core Services Layer                       │
+├─────────────────────────────────────────────────────────────┤
+│ Simulation Engine │ State Manager │ Analysis Engine │ Cache │
+└─────────────────────────────────────────────────────────────┘
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                  Data & Integration Layer                   │
+├─────────────────────────────────────────────────────────────┤
+│  HyperEVM Node    │   State Storage   │   Result Storage    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Component Architecture
+
+```typescript
+// Core architecture interfaces
+interface SimulationPlatform {
+  simulationEngine: SimulationEngine;
+  stateManager: StateManager;
+  analysisEngine: AnalysisEngine;
+  apiGateway: ApiGateway;
+  storage: StorageLayer;
+}
+
+interface SimulationEngine {
+  simulate(request: SimulationRequest): Promise<SimulationResult>;
+  simulateBundle(requests: SimulationRequest[]): Promise<BundleResult>;
+  validateTransaction(tx: Transaction): ValidationResult;
+}
+```
+
+---
+
+## Technology Stack
+
+### Core Technologies
+
+| Component | Technology | Justification |
+|-----------|------------|---------------|
+| **Runtime** | Node.js 20+ | Latest LTS with enhanced performance |
+| **Language** | TypeScript 5.0+ | Type safety and developer experience |
+| **Framework** | Express.js + Fastify | REST API and high-performance RPC |
+| **Database** | PostgreSQL + Redis | Persistent storage + high-speed caching |
+| **Queue** | BullMQ | Transaction processing queue |
+| **Frontend** | Next.js 14+ | React-based dashboard |
+| **Testing** | Jest + Vitest | Unit and integration testing |
+| **Documentation** | OpenAPI 3.0 | API specification |
+
+### HyperEVM-Specific Libraries
+
+```typescript
+// Essential dependencies
+{
+  "dependencies": {
+    // Core EVM & Ethereum libraries
+    "viem": "^2.0.0",           // TypeScript Ethereum interface
+    "ethers": "^6.8.0",        // Ethereum library
+    "@ethereumjs/vm": "^7.0.0", // EVM implementation
+    "@ethereumjs/tx": "^5.0.0", // Transaction utilities
+    "@ethereumjs/common": "^4.0.0", // Network configurations
+    
+    // Simulation & Testing
+    "ganache": "^7.9.0",       // Local blockchain simulation
+    "hardhat": "^2.19.0",      // Development environment
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    
+    // API & Server
+    "express": "^4.18.2",
+    "fastify": "^4.24.0",
+    "socket.io": "^4.7.0",     // Real-time updates
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",        // Security
+    
+    // Database & Caching
+    "pg": "^8.11.0",           // PostgreSQL client
+    "redis": "^4.6.0",         // Redis client
+    "prisma": "^5.7.0",        // ORM
+    "ioredis": "^5.3.0",       // Enhanced Redis client
+    
+    // Queue & Processing
+    "bullmq": "^5.0.0",        // Job queue
+    "node-cron": "^3.0.0",     // Scheduled tasks
+    
+    // Validation & Parsing
+    "joi": "^17.11.0",         // Input validation
+    "zod": "^3.22.0",          // Type-safe validation
+    "ajv": "^8.12.0",          // JSON schema validation
+    
+    // Utilities
+    "lodash": "^4.17.21",      // Utility functions
+    "axios": "^1.6.0",         // HTTP client
+    "winston": "^3.11.0",      // Logging
+    "dotenv": "^16.3.0",       // Environment variables
+    "uuid": "^9.0.0",          // UUID generation
+    
+    // Monitoring & Metrics
+    "prometheus-api-metrics": "^3.2.0",
+    "pino": "^8.16.0",         // High-performance logging
+    
+    // Security
+    "bcrypt": "^5.1.0",
+    "jsonwebtoken": "^9.0.0",
+    "rate-limiter-flexible": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/express": "^4.17.0",
+    "@types/jest": "^29.5.0",
+    "typescript": "^5.3.0",
+    "jest": "^29.7.0",
+    "vitest": "^1.0.0",
+    "nodemon": "^3.0.0",
+    "ts-node": "^10.9.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "prettier": "^3.1.0"
+  }
+}
+```
+
+---
+
+## Core Components
+
+### 1. Simulation Engine
+
+The heart of the platform, responsible for executing transaction simulations against HyperEVM.
+
+```typescript
+// src/core/simulation/SimulationEngine.ts
+import { VM } from '@ethereumjs/vm';
+import { Transaction } from '@ethereumjs/tx';
+import { Common } from '@ethereumjs/common';
+import { Account, Address } from '@ethereumjs/util';
+
+export class HyperEVMSimulationEngine {
+  private vm: VM;
+  private common: Common;
+  
+  constructor(chainConfig: ChainConfig) {
+    this.common = this.createHyperEVMCommon(chainConfig);
+    this.vm = new VM({ 
+      common: this.common,
+      activatePrecompiles: true 
+    });
+  }
+  
+  async simulate(request: SimulationRequest): Promise<SimulationResult> {
+    try {
+      // Apply state overrides if specified
+      await this.applyStateOverrides(request.stateOverrides);
+      
+      // Create transaction from request
+      const tx = this.createTransaction(request);
+      
+      // Execute simulation
+      const result = await this.vm.runTx({ tx });
+      
+      // Analyze results
+      const analysis = await this.analyzeExecution(result, request);
+      
+      return {
+        success: !result.execResult.exceptionError,
+        gasUsed: result.totalGasSpent,
+        gasPrice: tx.gasPrice,
+        gasLimit: tx.gasLimit,
+        executionTrace: this.buildExecutionTrace(result),
+        stateChanges: this.extractStateChanges(result),
+        events: this.decodeEvents(result.execResult.logs),
+        analysis,
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      return this.handleSimulationError(error, request);
+    }
+  }
+  
+  async simulateBundle(requests: SimulationRequest[]): Promise<BundleResult> {
+    const results: SimulationResult[] = [];
+    let cumulativeGas = BigInt(0);
+    
+    // Create VM snapshot for rollback capability
+    const snapshot = await this.vm.stateManager.checkpoint();
+    
+    try {
+      for (const request of requests) {
+        const result = await this.simulate(request);
+        results.push(result);
+        
+        if (!result.success && request.revertOnFailure) {
+          // Rollback and return partial results
+          await this.vm.stateManager.revert();
+          break;
+        }
+        
+        cumulativeGas += BigInt(result.gasUsed);
+      }
+      
+      await this.vm.stateManager.commit();
+      
+      return {
+        results,
+        totalGasUsed: cumulativeGas.toString(),
+        bundleHash: this.calculateBundleHash(requests),
+        interdependencies: this.analyzeDependencies(requests, results)
+      };
+    } catch (error) {
+      await this.vm.stateManager.revert();
+      throw error;
+    }
+  }
+  
+  private createHyperEVMCommon(config: ChainConfig): Common {
+    return Common.custom({
+      chainId: config.chainId, // HyperEVM chain ID
+      networkId: config.networkId,
+      name: 'hyperevm',
+      defaultHardfork: 'shanghai', // Latest supported hardfork
+      // HyperEVM-specific configurations
+      customCrypto: {
+        // Custom hash functions if needed
+      }
+    });
+  }
+  
+  private async applyStateOverrides(overrides?: StateOverride[]): Promise<void> {
+    if (!overrides) return;
+    
+    for (const override of overrides) {
+      const address = Address.fromString(override.address);
+      
+      // Override balance
+      if (override.balance) {
+        await this.vm.stateManager.putAccount(
+          address,
+          Account.fromAccountData({
+            balance: BigInt(override.balance)
+          })
+        );
+      }
+      
+      // Override storage
+      if (override.storage) {
+        for (const [key, value] of Object.entries(override.storage)) {
+          await this.vm.stateManager.putContractStorage(
+            address,
+            Buffer.from(key.slice(2), 'hex'),
+            Buffer.from(value.slice(2), 'hex')
+          );
+        }
+      }
+      
+      // Override code
+      if (override.code) {
+        await this.vm.stateManager.putContractCode(
+          address,
+          Buffer.from(override.code.slice(2), 'hex')
+        );
+      }
+    }
+  }
+}
+
+// Types for simulation requests and responses
+export interface SimulationRequest {
+  from: string;
+  to?: string;
+  value?: string;
+  data?: string;
+  gas?: string;
+  gasPrice?: string;
+  nonce?: string;
+  blockNumber?: string;
+  stateOverrides?: StateOverride[];
+  traceConfig?: TraceConfig;
+  accessList?: AccessList[];
+  revertOnFailure?: boolean;
+}
+
+export interface SimulationResult {
+  success: boolean;
+  gasUsed: string;
+  gasPrice: bigint;
+  gasLimit: bigint;
+  returnValue?: string;
+  executionTrace?: ExecutionTrace;
+  stateChanges: StateChange[];
+  events: DecodedEvent[];
+  analysis: TransactionAnalysis;
+  error?: string;
+  timestamp: number;
+}
+
+export interface StateOverride {
+  address: string;
+  balance?: string;
+  nonce?: string;
+  code?: string;
+  storage?: Record<string, string>;
+}
+```
+
+### 2. State Manager
+
+Manages blockchain state snapshots and historical data.
+
+```typescript
+// src/core/state/StateManager.ts
+export class HyperEVMStateManager {
+  private stateCache: Map<string, StateSnapshot>;
+  private redis: Redis;
+  private db: PrismaClient;
+  
+  constructor(config: StateConfig) {
+    this.redis = new Redis(config.redis);
+    this.db = new PrismaClient();
+    this.stateCache = new Map();
+  }
+  
+  async getStateAtBlock(blockNumber: number): Promise<StateSnapshot> {
+    const cacheKey = `state:${blockNumber}`;
+    
+    // Check memory cache
+    if (this.stateCache.has(cacheKey)) {
+      return this.stateCache.get(cacheKey)!;
+    }
+    
+    // Check Redis cache
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      const state = JSON.parse(cached);
+      this.stateCache.set(cacheKey, state);
+      return state;
+    }
+    
+    // Fetch from HyperEVM node
+    const state = await this.fetchStateFromNode(blockNumber);
+    
+    // Cache the result
+    await this.redis.setex(cacheKey, 3600, JSON.stringify(state));
+    this.stateCache.set(cacheKey, state);
+    
+    return state;
+  }
+  
+  async forkState(blockNumber: number): Promise<ForkedState> {
+    const baseState = await this.getStateAtBlock(blockNumber);
+    
+    return new ForkedState(baseState, {
+      onStateChange: (change) => this.trackStateChange(change),
+      maxMemoryUsage: 1024 * 1024 * 100 // 100MB limit
+    });
+  }
+  
+  private async fetchStateFromNode(blockNumber: number): Promise<StateSnapshot> {
+    // Implementation to fetch state from HyperEVM node
+    // This would use the HyperEVM JSON-RPC endpoint
+    const blockData = await this.rpcCall('eth_getBlockByNumber', [
+      `0x${blockNumber.toString(16)}`,
+      true
+    ]);
+    
+    return {
+      blockNumber,
+      stateRoot: blockData.stateRoot,
+      timestamp: parseInt(blockData.timestamp, 16),
+      accounts: await this.fetchAccountState(blockNumber),
+      contracts: await this.fetchContractState(blockNumber)
+    };
+  }
+}
+
+interface StateSnapshot {
+  blockNumber: number;
+  stateRoot: string;
+  timestamp: number;
+  accounts: Map<string, AccountState>;
+  contracts: Map<string, ContractState>;
+}
+
+interface ForkedState extends StateSnapshot {
+  modifications: StateChange[];
+  parentBlock: number;
+  fork(): ForkedState;
+  commit(): Promise<void>;
+  revert(): void;
+}
+```
+
+### 3. Analysis Engine
+
+Provides deep insights into transaction execution and gas optimization.
+
+```typescript
+// src/core/analysis/AnalysisEngine.ts
+export class TransactionAnalysisEngine {
+  private gasProfiler: GasProfiler;
+  private eventDecoder: EventDecoder;
+  private traceAnalyzer: TraceAnalyzer;
+  
+  constructor() {
+    this.gasProfiler = new GasProfiler();
+    this.eventDecoder = new EventDecoder();
+    this.traceAnalyzer = new TraceAnalyzer();
+  }
+  
+  async analyzeTransaction(result: SimulationResult): Promise<TransactionAnalysis> {
+    const gasAnalysis = await this.gasProfiler.analyze(result.executionTrace);
+    const eventAnalysis = await this.analyzeEvents(result.events);
+    const performanceMetrics = this.calculatePerformanceMetrics(result);
+    const securityInsights = await this.analyzeSecurityImplications(result);
+    
+    return {
+      gasAnalysis,
+      eventAnalysis,
+      performanceMetrics,
+      securityInsights,
+      optimizationSuggestions: this.generateOptimizationSuggestions(gasAnalysis),
+      riskAssessment: this.assessTransactionRisk(result)
+    };
+  }
+  
+  private async analyzeEvents(events: DecodedEvent[]): Promise<EventAnalysis> {
+    const tokenTransfers = events.filter(e => 
+      e.signature === 'Transfer(address,address,uint256)'
+    );
+    
+    const balanceChanges = this.calculateBalanceChanges(tokenTransfers);
+    
+    return {
+      totalEvents: events.length,
+      tokenTransfers: tokenTransfers.length,
+      balanceChanges,
+      uniqueContracts: [...new Set(events.map(e => e.address))].length,
+      eventsByContract: this.groupEventsByContract(events)
+    };
+  }
+  
+  private generateOptimizationSuggestions(gasAnalysis: GasAnalysis): OptimizationSuggestion[] {
+    const suggestions: OptimizationSuggestion[] = [];
+    
+    // Storage optimization suggestions
+    if (gasAnalysis.storageWrites > 5) {
+      suggestions.push({
+        type: 'STORAGE_OPTIMIZATION',
+        severity: 'MEDIUM',
+        description: 'Consider batching storage writes to reduce gas costs',
+        potentialSavings: Math.floor(gasAnalysis.storageWrites * 0.3) + ' gas per write'
+      });
+    }
+    
+    // Loop optimization
+    if (gasAnalysis.loopIterations > 100) {
+      suggestions.push({
+        type: 'LOOP_OPTIMIZATION',
+        severity: 'HIGH',
+        description: 'Large loop detected. Consider pagination or gas-efficient alternatives',
+        potentialSavings: 'Up to 50% gas reduction possible'
+      });
+    }
+    
+    return suggestions;
+  }
+}
+
+interface TransactionAnalysis {
+  gasAnalysis: GasAnalysis;
+  eventAnalysis: EventAnalysis;
+  performanceMetrics: PerformanceMetrics;
+  securityInsights: SecurityInsight[];
+  optimizationSuggestions: OptimizationSuggestion[];
+  riskAssessment: RiskAssessment;
+}
+```
+
+### 4. API Gateway
+
+Provides REST and RPC endpoints for integration.
+
+```typescript
+// src/api/APIGateway.ts
+import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+
+export class APIGateway {
+  private app: express.Application;
+  private server: any;
+  private io: SocketIOServer;
+  private simulationEngine: HyperEVMSimulationEngine;
+  
+  constructor(simulationEngine: HyperEVMSimulationEngine) {
+    this.simulationEngine = simulationEngine;
+    this.setupExpress();
+    this.setupSocketIO();
+    this.setupRoutes();
+    this.setupMiddleware();
+  }
+  
+  private setupRoutes(): void {
+    // REST API Routes
+    this.app.post('/api/v1/simulate', this.handleSimulation.bind(this));
+    this.app.post('/api/v1/simulate/bundle', this.handleBundleSimulation.bind(this));
+    this.app.get('/api/v1/gas-estimate/:txHash', this.handleGasEstimate.bind(this));
+    this.app.get('/api/v1/trace/:txHash', this.handleTrace.bind(this));
+    
+    // HyperEVM-specific endpoints
+    this.app.get('/api/v1/hyperevm/precompiles', this.handlePrecompiles.bind(this));
+    this.app.post('/api/v1/hyperevm/cross-chain', this.handleCrossChain.bind(this));
+    
+    // JSON-RPC endpoint for EVM compatibility
+    this.app.post('/rpc', this.handleRPC.bind(this));
+  }
+  
+  private async handleSimulation(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      // Validate request
+      const validationResult = this.validateSimulationRequest(req.body);
+      if (!validationResult.valid) {
+        res.status(400).json({ error: validationResult.errors });
+        return;
+      }
+      
+      // Execute simulation
+      const result = await this.simulationEngine.simulate(req.body);
+      
+      // Emit real-time update via WebSocket
+      this.io.emit('simulationComplete', {
+        requestId: req.body.requestId,
+        result
+      });
+      
+      res.json({
+        success: true,
+        data: result,
+        meta: {
+          processingTime: result.analysis.performanceMetrics.executionTime,
+          version: '1.0.0'
+        }
+      });
+    } catch (error) {
+      this.handleError(error, res);
+    }
+  }
+  
+  private async handleRPC(req: express.Request, res: express.Response): Promise<void> {
+    const { method, params, id } = req.body;
+    
+    try {
+      let result;
+      
+      switch (method) {
+        case 'eth_call':
+          result = await this.handleEthCall(params);
+          break;
+        case 'eth_estimateGas':
+          result = await this.handleEthEstimateGas(params);
+          break;
+        case 'tenderly_simulateTransaction':
+          result = await this.handleTenderlySimulate(params);
+          break;
+        case 'hyperevm_simulate':
+          result = await this.handleHyperEVMSimulate(params);
+          break;
+        default:
+          throw new Error(`Method ${method} not supported`);
+      }
+      
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        result
+      });
+    } catch (error) {
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32000,
+          message: error.message
+        }
+      });
+    }
+  }
+  
+  start(port: number): void {
+    this.server.listen(port, () => {
+      console.log(`HyperEVM Simulation Platform running on port ${port}`);
+    });
+  }
+}
+```
+
+---
+
+## Implementation Guide
+
+### Phase 1: Core Foundation (Weeks 1-4)
+
+#### Step 1: Project Setup
+
+```bash
+# Initialize project
+mkdir hyperevm-simulation-platform
+cd hyperevm-simulation-platform
+npm init -y
+
+# Install core dependencies
+npm install express fastify @ethereumjs/vm @ethereumjs/tx viem ethers
+npm install -D typescript @types/node @types/express jest ts-node nodemon
+
+# Setup TypeScript configuration
+npx tsc --init
+```
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}
+```
+
+#### Step 2: Core Simulation Engine
+
+```typescript
+// src/core/HyperEVMEngine.ts
+export class HyperEVMEngine {
+  async initialize(config: HyperEVMConfig): Promise<void> {
+    // Initialize VM with HyperEVM specifications
+    this.setupVM(config);
+    await this.loadHyperEVMPrecompiles();
+    await this.syncWithNetwork();
+  }
+  
+  private setupVM(config: HyperEVMConfig): void {
+    const common = Common.custom({
+      chainId: config.chainId,
+      name: 'hyperevm',
+      networkId: config.networkId,
+      // HyperEVM-specific configurations
+      defaultHardfork: 'shanghai',
+      hardforks: [
+        // Define HyperEVM-specific hardforks if any
+        {
+          name: 'hyperevm-genesis',
+          block: 0
+        }
+      ]
+    });
+    
+    this.vm = new VM({
+      common,
+      activatePrecompiles: true,
+      // Custom state manager for HyperEVM
+      stateManager: new HyperEVMStateManager(config.stateConfig)
+    });
+  }
+}
+```
+
+### Phase 2: State Management (Weeks 5-8)
+
+#### Database Schema
+
+```sql
+-- PostgreSQL schema for state management
+CREATE TABLE block_states (
+  block_number BIGINT PRIMARY KEY,
+  state_root VARCHAR(66) NOT NULL,
+  timestamp TIMESTAMP NOT NULL,
+  parent_hash VARCHAR(66),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE account_states (
+  id SERIAL PRIMARY KEY,
+  block_number BIGINT REFERENCES block_states(block_number),
+  address VARCHAR(42) NOT NULL,
+  balance NUMERIC(78, 0),
+  nonce BIGINT,
+  code_hash VARCHAR(66),
+  storage_root VARCHAR(66),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE simulation_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_hash VARCHAR(66) UNIQUE NOT NULL,
+  block_number BIGINT,
+  gas_used BIGINT,
+  gas_limit BIGINT,
+  success BOOLEAN,
+  return_value TEXT,
+  execution_trace JSONB,
+  events JSONB,
+  state_changes JSONB,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_block_states_number ON block_states(block_number);
+CREATE INDEX idx_account_states_address_block ON account_states(address, block_number);
+CREATE INDEX idx_simulation_results_hash ON simulation_results(request_hash);
+```
+
+### Phase 3: API Development (Weeks 9-12)
+
+#### OpenAPI Specification
+
+```yaml
+# docs/api-spec.yaml
+openapi: 3.0.3
+info:
+  title: HyperEVM Simulation Platform API
+  version: 1.0.0
+  description: Comprehensive transaction simulation for HyperEVM
+servers:
+  - url: https://api.hyperevm-sim.com/v1
+paths:
+  /simulate:
+    post:
+      summary: Simulate a single transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        '200':
+          description: Simulation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResponse'
+                
+components:
+  schemas:
+    SimulationRequest:
+      type: object
+      required:
+        - from
+        - to
+        - data
+      properties:
+        from:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        to:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        value:
+          type: string
+          pattern: '^0x[a-fA-F0-9]+$'
+        data:
+          type: string
+          pattern: '^0x[a-fA-F0-9]*$'
+        gas:
+          type: string
+          pattern: '^0x[a-fA-F0-9]+$'
+        gasPrice:
+          type: string
+          pattern: '^0x[a-fA-F0-9]+$'
+        blockNumber:
+          type: string
+          enum: ['latest', 'pending']
+        stateOverrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/StateOverride'
+```
+
+### Phase 4: Frontend Development (Weeks 13-16)
+
+#### Next.js Dashboard Setup
+
+```typescript
+// frontend/src/components/SimulationDashboard.tsx
+'use client';
+
+import { useState, useCallback } from 'react';
+import { SimulationRequest, SimulationResult } from '@/types/simulation';
+
+export function SimulationDashboard() {
+  const [request, setRequest] = useState<Partial<SimulationRequest>>({});
+  const [result, setResult] = useState<SimulationResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  
+  const handleSimulate = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request)
+      });
+      
+      const data = await response.json();
+      setResult(data.result);
+    } catch (error) {
+      console.error('Simulation failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
+  
+  return (
+    <div className="simulation-dashboard">
+      <TransactionBuilder 
+        value={request} 
+        onChange={setRequest} 
+      />
+      <SimulationControls 
+        onSimulate={handleSimulate} 
+        loading={loading} 
+      />
+      {result && (
+        <ResultsViewer result={result} />
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## API Documentation
+
+### REST API Endpoints
+
+#### POST /api/v1/simulate
+Simulate a single transaction against HyperEVM.
+
+**Request Body:**
+```typescript
+interface SimulationRequest {
+  from: string;              // Sender address
+  to?: string;              // Recipient address
+  value?: string;           // Transaction value in hex
+  data?: string;            // Transaction data
+  gas?: string;             // Gas limit
+  gasPrice?: string;        // Gas price
+  nonce?: string;           // Transaction nonce
+  blockNumber?: string;     // Block number for simulation ("latest" | "pending" | hex)
+  stateOverrides?: StateOverride[]; // State modifications
+  traceConfig?: TraceConfig; // Execution trace configuration
+  accessList?: AccessListItem[]; // EIP-2930 access list
+}
+
+interface StateOverride {
+  address: string;
+  balance?: string;
+  nonce?: string;
+  code?: string;
+  storage?: Record<string, string>;
+}
+```
+
+**Response:**
+```typescript
+interface SimulationResponse {
+  success: boolean;
+  data: {
+    success: boolean;
+    gasUsed: string;
+    gasPrice: string;
+    gasLimit: string;
+    returnValue?: string;
+    executionTrace?: ExecutionTrace;
+    stateChanges: StateChange[];
+    events: DecodedEvent[];
+    analysis: TransactionAnalysis;
+    error?: string;
+    timestamp: number;
+  };
+  meta: {
+    processingTime: number;
+    version: string;
+  };
+}
+```
+
+#### POST /api/v1/simulate/bundle
+Simulate multiple interdependent transactions as a bundle.
+
+**Request Body:**
+```typescript
+interface BundleSimulationRequest {
+  transactions: SimulationRequest[];
+  options: {
+    revertOnFailure?: boolean;
+    gasLimit?: string;
+    blockNumber?: string;
+  };
+}
+```
+
+**Response:**
+```typescript
+interface BundleSimulationResponse {
+  success: boolean;
+  data: {
+    results: SimulationResult[];
+    totalGasUsed: string;
+    bundleHash: string;
+    interdependencies: TransactionDependency[];
+  };
+}
+```
+
+#### GET /api/v1/gas-estimate/:txHash
+Get detailed gas estimation and optimization suggestions.
+
+**Response:**
+```typescript
+interface GasEstimateResponse {
+  estimated: string;
+  breakdown: {
+    base: string;
+    execution: string;
+    storage: string;
+    logs: string;
+  };
+  optimizations: OptimizationSuggestion[];
+  historicalComparison: {
+    average: string;
+    percentile95: string;
+    trend: 'increasing' | 'decreasing' | 'stable';
+  };
+}
+```
+
+### JSON-RPC API
+
+The platform provides full JSON-RPC compatibility with additional HyperEVM-specific methods.
+
+#### Standard Ethereum Methods
+
+```typescript
+// eth_call - Execute a message call transaction
+{
+  "jsonrpc": "2.0",
+  "method": "eth_call",
+  "params": [
+    {
+      "from": "0x...",
+      "to": "0x...",
+      "data": "0x..."
+    },
+    "latest"
+  ],
+  "id": 1
+}
+
+// eth_estimateGas - Estimate gas needed for transaction
+{
+  "jsonrpc": "2.0",
+  "method": "eth_estimateGas",
+  "params": [{
+    "from": "0x...",
+    "to": "0x...",
+    "value": "0x...",
+    "data": "0x..."
+  }],
+  "id": 1
+}
+```
+
+#### HyperEVM-Specific Methods
+
+```typescript
+// hyperevm_simulate - Enhanced simulation with HyperEVM features
+{
+  "jsonrpc": "2.0",
+  "method": "hyperevm_simulate",
+  "params": {
+    "transaction": {
+      "from": "0x...",
+      "to": "0x...",
+      "data": "0x..."
+    },
+    "blockNumber": "latest",
+    "stateOverrides": {},
+    "traceConfig": {
+      "enableMemory": true,
+      "enableReturnData": true,
+      "tracer": "callTracer"
+    }
+  },
+  "id": 1
+}
+
+// hyperevm_simulateBundle - Bundle simulation
+{
+  "jsonrpc": "2.0",
+  "method": "hyperevm_simulateBundle",
+  "params": {
+    "transactions": [...],
+    "blockNumber": "latest",
+    "options": {
+      "revertOnFailure": true
+    }
+  },
+  "id": 1
+}
+
+// hyperevm_getPrecompiles - Get available precompiled contracts
+{
+  "jsonrpc": "2.0",
+  "method": "hyperevm_getPrecompiles",
+  "params": [],
+  "id": 1
+}
+```
+
+---
+
+## Testing Strategy
+
+### Test Architecture
+
+```typescript
+// tests/setup/TestEnvironment.ts
+export class TestEnvironment {
+  private engine: HyperEVMSimulationEngine;
+  private testAccounts: TestAccount[];
+  private contracts: DeployedContract[];
+  
+  async setup(): Promise<void> {
+    // Initialize test engine with local state
+    this.engine = new HyperEVMSimulationEngine({
+      chainId: 31337, // Local test network
+      rpcUrl: 'http://localhost:8545',
+      cacheEnabled: false // Disable caching for tests
+    });
+    
+    // Deploy test contracts
+    await this.deployTestContracts();
+    
+    // Setup test accounts with initial balances
+    await this.setupTestAccounts();
+  }
+  
+  private async deployTestContracts(): Promise<void> {
+    const contracts = [
+      { name: 'ERC20Token', bytecode: ERC20_BYTECODE },
+      { name: 'ComplexDeFiProtocol', bytecode: DEFI_BYTECODE },
+      { name: 'GasOptimizedContract', bytecode: OPTIMIZED_BYTECODE }
+    ];
+    
+    for (const contract of contracts) {
+      const result = await this.engine.simulate({
+        from: this.testAccounts[0].address,
+        data: contract.bytecode,
+        gas: '0x500000'
+      });
+      
+      this.contracts.push({
+        name: contract.name,
+        address: result.contractAddress!,
+        abi: contract.abi
+      });
+    }
+  }
+}
+```
+
+### Unit Tests
+
+```typescript
+// tests/unit/SimulationEngine.test.ts
+import { HyperEVMSimulationEngine } from '../../src/core/simulation/SimulationEngine';
+import { TestEnvironment } from '../setup/TestEnvironment';
+
+describe('HyperEVMSimulationEngine', () => {
+  let env: TestEnvironment;
+  let engine: HyperEVMSimulationEngine;
+  
+  beforeAll(async () => {
+    env = new TestEnvironment();
+    await env.setup();
+    engine = env.getEngine();
+  });
+  
+  describe('Basic Simulation', () => {
+    it('should simulate simple ETH transfer', async () => {
+      const result = await engine.simulate({
+        from: env.accounts[0].address,
+        to: env.accounts[1].address,
+        value: '0x1000000000000000000', // 1 ETH
+        gas: '0x5208' // 21000 gas
+      });
+      
+      expect(result.success).toBe(true);
+      expect(result.gasUsed).toBe('21000');
+      expect(result.stateChanges).toHaveLength(2); // Sender and receiver balance changes
+    });
+    
+    it('should simulate ERC-20 transfer', async () => {
+      const erc20 = env.contracts.find(c => c.name === 'ERC20Token')!;
+      const transferData = encodeTransferCall(env.accounts[1].address, '1000000000000000000');
+      
+      const result = await engine.simulate({
+        from: env.accounts[0].address,
+        to: erc20.address,
+        data: transferData,
+        gas: '0x15f90'
+      });
+      
+      expect(result.success).toBe(true);
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          signature: 'Transfer(address,address,uint256)'
+        })
+      );
+    });
+  });
+  
+  describe('State Overrides', () => {
+    it('should apply balance overrides correctly', async () => {
+      const originalBalance = await engine.getBalance(env.accounts[0].address);
+      const overrideBalance = '0x56BC75E2D630E44000'; // 100 ETH
+      
+      const result = await engine.simulate({
+        from: env.accounts[0].address,
+        to: env.accounts[1].address,
+        value: '0x4563918244F40000', // 5 ETH
+        stateOverrides: [{
+          address: env.accounts[0].address,
+          balance: overrideBalance
+        }]
+      });
+      
+      expect(result.success).toBe(true);
+      // Original balance should be unchanged after simulation
+      const currentBalance = await engine.getBalance(env.accounts[0].address);
+      expect(currentBalance).toBe(originalBalance);
+    });
+    
+    it('should apply storage overrides', async () => {
+      const erc20 = env.contracts.find(c => c.name === 'ERC20Token')!;
+      const balanceSlot = calculateStorageSlot(env.accounts[0].address, 0); // Balance mapping slot
+      
+      const result = await engine.simulate({
+        from: env.accounts[0].address,
+        to: erc20.address,
+        data: encodeTransferCall(env.accounts[1].address, '1000000000000000000'),
+        stateOverrides: [{
+          address: erc20.address,
+          storage: {
+            [balanceSlot]: '0x56BC75E2D630E44000' // Override balance to 100 tokens
+          }
+        }]
+      });
+      
+      expect(result.success).toBe(true);
+    });
+  });
+  
+  describe('Bundle Simulation', () => {
+    it('should simulate transaction bundle with dependencies', async () => {
+      const erc20 = env.contracts.find(c => c.name === 'ERC20Token')!;
+      
+      const bundle = [
+        {
+          from: env.accounts[0].address,
+          to: erc20.address,
+          data: encodeApprovalCall(env.accounts[1].address, '2000000000000000000')
+        },
+        {
+          from: env.accounts[1].address,
+          to: erc20.address,
+          data: encodeTransferFromCall(env.accounts[0].address, env.accounts[2].address, '1000000000000000000')
+        }
+      ];
+      
+      const result = await engine.simulateBundle(bundle);
+      
+      expect(result.results).toHaveLength(2);
+      expect(result.results[0].success).toBe(true);
+      expect(result.results[1].success).toBe(true);
+      expect(result.interdependencies).toContainEqual(
+        expect.objectContaining({
+          from: 0,
+          to: 1,
+          type: 'ALLOWANCE_DEPENDENCY'
+        })
+      );
+    });
+  });
+  
+  describe('Gas Analysis', () => {
+    it('should provide detailed gas breakdown', async () => {
+      const complexContract = env.contracts.find(c => c.name === 'ComplexDeFiProtocol')!;
+      const callData = encodeComplexCall();
+      
+      const result = await engine.simulate({
+        from: env.accounts[0].address,
+        to: complexContract.address,
+        data: callData,
+        gas: '0x100000'
+      });
+      
+      expect(result.analysis.gasAnalysis).toMatchObject({
+        baseGas: expect.any(Number),
+        executionGas: expect.any(Number),
+        storageGas: expect.any(Number),
+        logGas: expect.any(Number),
+        breakdown: expect.arrayContaining([
+          expect.objectContaining({
+            operation: expect.any(String),
+            cost: expect.any(Number),
+            percentage: expect.any(Number)
+          })
+        ])
+      });
+    });
+  });
+});
+```
+
+### Integration Tests
+
+```typescript
+// tests/integration/APIIntegration.test.ts
+import request from 'supertest';
+import { Application } from '../../src/app';
+
+describe('API Integration Tests', () => {
+  let app: Application;
+  
+  beforeAll(async () => {
+    app = new Application({
+      port: 0, // Use random port for testing
+      database: {
+        url: process.env.TEST_DATABASE_URL
+      },
+      redis: {
+        url: process.env.TEST_REDIS_URL
+      }
+    });
+    await app.start();
+  });
+  
+  afterAll(async () => {
+    await app.stop();
+  });
+  
+  describe('POST /api/v1/simulate', () => {
+    it('should simulate transaction via REST API', async () => {
+      const response = await request(app.server)
+        .post('/api/v1/simulate')
+        .send({
+          from: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3d',
+          to: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3e',
+          value: '0x1000000000000000000',
+          gas: '0x5208'
+        })
+        .expect(200);
+      
+      expect(response.body).toMatchObject({
+        success: true,
+        data: {
+          success: true,
+          gasUsed: '21000'
+        }
+      });
+    });
+    
+    it('should validate request parameters', async () => {
+      const response = await request(app.server)
+        .post('/api/v1/simulate')
+        .send({
+          from: 'invalid-address', // Invalid address format
+          to: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3e'
+        })
+        .expect(400);
+      
+      expect(response.body.error).toContain('Invalid address format');
+    });
+  });
+  
+  describe('JSON-RPC API', () => {
+    it('should handle eth_call method', async () => {
+      const response = await request(app.server)
+        .post('/rpc')
+        .send({
+          jsonrpc: '2.0',
+          method: 'eth_call',
+          params: [{
+            from: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3d',
+            to: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3e',
+            data: '0x'
+          }, 'latest'],
+          id: 1
+        })
+        .expect(200);
+      
+      expect(response.body).toMatchObject({
+        jsonrpc: '2.0',
+        id: 1,
+        result: expect.any(String)
+      });
+    });
+  });
+});
+```
+
+### Performance Tests
+
+```typescript
+// tests/performance/LoadTest.ts
+import { performance } from 'perf_hooks';
+import { HyperEVMSimulationEngine } from '../../src/core/simulation/SimulationEngine';
+
+describe('Performance Tests', () => {
+  let engine: HyperEVMSimulationEngine;
+  
+  beforeAll(async () => {
+    engine = new HyperEVMSimulationEngine({
+      chainId: 31337,
+      rpcUrl: 'http://localhost:8545'
+    });
+  });
+  
+  it('should handle concurrent simulations', async () => {
+    const concurrentRequests = 100;
+    const requests = Array(concurrentRequests).fill(null).map((_, index) => ({
+      from: `0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e${index.toString(16).padStart(2, '0')}`,
+      to: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3e',
+      value: '0x1000000000000000000',
+      gas: '0x5208'
+    }));
+    
+    const startTime = performance.now();
+    const results = await Promise.all(
+      requests.map(request => engine.simulate(request))
+    );
+    const endTime = performance.now();
+    
+    expect(results).toHaveLength(concurrentRequests);
+    expect(results.every(r => r.success)).toBe(true);
+    
+    const averageTime = (endTime - startTime) / concurrentRequests;
+    expect(averageTime).toBeLessThan(100); // Should average < 100ms per simulation
+  });
+  
+  it('should maintain performance with large state overrides', async () => {
+    const largeStateOverride = {
+      address: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3d',
+      storage: {}
+    };
+    
+    // Create 1000 storage overrides
+    for (let i = 0; i < 1000; i++) {
+      largeStateOverride.storage[`0x${i.toString(16).padStart(64, '0')}`] = 
+        `0x${(i + 1).toString(16).padStart(64, '0')}`;
+    }
+    
+    const startTime = performance.now();
+    const result = await engine.simulate({
+      from: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3d',
+      to: '0x742d35Cc6635C0532925a3b8f3e49e4B4d5a0e3e',
+      value: '0x1000000000000000000',
+      stateOverrides: [largeStateOverride]
+    });
+    const endTime = performance.now();
+    
+    expect(result.success).toBe(true);
+    expect(endTime - startTime).toBeLessThan(1000); // Should complete in < 1 second
+  });
+});
+```
+
+---
+
+## Deployment
+
+### Docker Configuration
+
+```dockerfile
+# Dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runtime
+
+# Install production dependencies
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
+
+# Copy built application
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001
+
+USER nextjs
+
+EXPOSE 3000 8545
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  hyperevm-simulation:
+    build: .
+    ports:
+      - "3000:3000"    # REST API
+      - "8545:8545"    # JSON-RPC
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://user:password@postgres:5432/hyperevm_sim
+      - REDIS_URL=redis://redis:6379
+      - HYPEREVM_RPC_URL=https://api.hyperliquid-testnet.xyz/evm
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=hyperevm_sim
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - hyperevm-simulation
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+```
+
+### Kubernetes Deployment
+
+```yaml
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hyperevm-simulation
+  labels:
+    app: hyperevm-simulation
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: hyperevm-simulation
+  template:
+    metadata:
+      labels:
+        app: hyperevm-simulation
+    spec:
+      containers:
+      - name: hyperevm-simulation
+        image: hyperevm/simulation-platform:latest
+        ports:
+        - containerPort: 3000
+        - containerPort: 8545
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: hyperevm-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: hyperevm-secrets
+              key: redis-url
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hyperevm-simulation-service
+spec:
+  selector:
+    app: hyperevm-simulation
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 3000
+    - name: rpc
+      protocol: TCP
+      port: 8545
+      targetPort: 8545
+  type: LoadBalancer
+```
+
+### CI/CD Pipeline
+
+```yaml
+# .github/workflows/deploy.yml
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run linter
+      run: npm run lint
+    
+    - name: Run type check
+      run: npm run type-check
+    
+    - name: Run unit tests
+      run: npm run test:unit
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+    
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+        REDIS_URL: redis://localhost:6379
+    
+    - name: Generate test coverage
+      run: npm run test:coverage
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}:latest
+          ghcr.io/${{ github.repository }}:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to Kubernetes
+      run: |
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+        kubectl set image deployment/hyperevm-simulation hyperevm-simulation=ghcr.io/${{ github.repository }}:${{ github.sha }}
+        kubectl rollout status deployment/hyperevm-simulation
+```
+
+---
+
+## Performance Optimization
+
+### Caching Strategy
+
+```typescript
+// src/core/cache/CacheManager.ts
+export class CacheManager {
+  private redis: Redis;
+  private memoryCache: LRUCache<string, any>;
+  private compressionEnabled: boolean;
+  
+  constructor(config: CacheConfig) {
+    this.redis = new Redis(config.redis);
+    this.memoryCache = new LRUCache({
+      max: config.memoryCache.maxItems,
+      maxSize: config.memoryCache.maxSize,
+      ttl: config.memoryCache.ttl
+    });
+    this.compressionEnabled = config.compression;
+  }
+  
+  async get<T>(key: string): Promise<T | null> {
+    // Check memory cache first (fastest)
+    const memoryResult = this.memoryCache.get(key);
+    if (memoryResult !== undefined) {
+      return memoryResult as T;
+    }
+    
+    // Check Redis cache
+    const redisResult = await this.redis.get(key);
+    if (redisResult) {
+      let data = redisResult;
+      
+      // Decompress if needed
+      if (this.compressionEnabled) {
+        data = await this.decompress(data);
+      }
+      
+      const parsed = JSON.parse(data);
+      
+      // Store in memory cache for future requests
+      this.memoryCache.set(key, parsed);
+      
+      return parsed as T;
+    }
+    
+    return null;
+  }
+  
+  async set<T>(key: string, value: T, ttl?: number): Promise<void> {
+    // Store in memory cache
+    this.memoryCache.set(key, value);
+    
+    // Serialize and optionally compress for Redis
+    let serialized = JSON.stringify(value);
+    if (this.compressionEnabled) {
+      serialized = await this.compress(serialized);
+    }
+    
+    // Store in Redis with TTL
+    if (ttl) {
+      await this.redis.setex(key, ttl, serialized);
+    } else {
+      await this.redis.set(key, serialized);
+    }
+  }
+  
+  generateCacheKey(request: SimulationRequest): string {
+    // Create deterministic cache key from request
+    const keyData = {
+      from: request.from,
+      to: request.to,
+      data: request.data,
+      value: request.value,
+      blockNumber: request.blockNumber,
+      stateOverrides: this.hashStateOverrides(request.stateOverrides)
+    };
+    
+    return `sim:${this.hashObject(keyData)}`;
+  }
+  
+  private hashObject(obj: any): string {
+    return crypto
+      .createHash('sha256')
+      .update(JSON.stringify(obj))
+      .digest('hex')
+      .substring(0, 16);
+  }
+}
+```
+
+### Database Optimization
+
+```sql
+-- Optimized indexes for performance
+CREATE INDEX CONCURRENTLY idx_simulation_results_block_number 
+ON simulation_results(block_number) 
+WHERE success = true;
+
+CREATE INDEX CONCURRENTLY idx_simulation_results_created_at_success 
+ON simulation_results(created_at DESC, success) 
+WHERE created_at > NOW() - INTERVAL '7 days';
+
+-- Partial index for frequently accessed recent simulations
+CREATE INDEX CONCURRENTLY idx_recent_successful_simulations 
+ON simulation_results(request_hash) 
+WHERE created_at > NOW() - INTERVAL '1 day' AND success = true;
+
+-- Optimize for gas analysis queries
+CREATE INDEX CONCURRENTLY idx_gas_analysis 
+ON simulation_results USING GIN(execution_trace) 
+WHERE success = true;
+```
+
+### Connection Pooling
+
+```typescript
+// src/database/ConnectionPool.ts
+export class DatabaseConnectionPool {
+  private pool: Pool;
+  
+  constructor(config: DatabaseConfig) {
+    this.pool = new Pool({
+      connectionString: config.url,
+      max: config.maxConnections || 20,
+      min: config.minConnections || 5,
+      idleTimeoutMillis: config.idleTimeout || 30000,
+      connectionTimeoutMillis: config.connectionTimeout || 2000,
+      maxUses: config.maxUses || 7500,
+      // Optimize for high-throughput workloads
+      statement_timeout: 30000,
+      query_timeout: 30000,
+      // Connection validation
+      application_name: 'hyperevm-simulation-platform'
+    });
+    
+    // Handle pool errors
+    this.pool.on('error', (err) => {
+      console.error('Database pool error:', err);
+    });
+    
+    // Monitor pool performance
+    this.setupPoolMonitoring();
+  }
+  
+  private setupPoolMonitoring(): void {
+    setInterval(() => {
+      const stats = {
+        total: this.pool.totalCount,
+        idle: this.pool.idleCount,
+        waiting: this.pool.waitingCount
+      };
+      
+      // Log pool statistics
+      console.log('Database pool stats:', stats);
+      
+      // Alert if pool is under stress
+      if (stats.waiting > 5) {
+        console.warn('High database connection wait queue:', stats.waiting);
+      }
+    }, 30000);
+  }
+}
+```
+
+### Request Queuing
+
+```typescript
+// src/core/queue/SimulationQueue.ts
+import { Queue, Worker, Job } from 'bullmq';
+
+export class SimulationQueue {
+  private queue: Queue<SimulationRequest>;
+  private worker: Worker<SimulationRequest>;
+  
+  constructor(
+    private engine: HyperEVMSimulationEngine,
+    redisConnection: ConnectionOptions
+  ) {
+    this.queue = new Queue('simulation', {
+      connection: redisConnection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000
