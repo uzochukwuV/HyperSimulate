@@ -91,14 +91,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Simulate single transaction
   app.post("/api/v1/simulate", async (req, res) => {
     try {
-      const validatedRequest = simulationRequestSchema.parse(req.body);
-      
+      // Step 1: Parse gasLimit as hex (0x...) or decimal, default to 21000 if invalid.
+      let incomingGasLimit = req.body?.transaction?.gasLimit;
+      let parsedGasLimit = 21000;
+      if (typeof incomingGasLimit === "string") {
+        if (incomingGasLimit.startsWith("0x")) {
+          parsedGasLimit = parseInt(incomingGasLimit, 16) || 21000;
+        } else if (!isNaN(Number(incomingGasLimit))) {
+          parsedGasLimit = parseInt(incomingGasLimit, 10) || 21000;
+        }
+      } else if (typeof incomingGasLimit === "number") {
+        parsedGasLimit = incomingGasLimit || 21000;
+      }
+
+      // Step 2: Allow executionMode in body and pass through
+      const validatedRequest = simulationRequestSchema.parse({
+        ...req.body,
+        executionMode: req.body.executionMode || req.body.execution_mode || "rpc",
+      });
+
       // Create simulation record
       const simulation = await storage.createSimulation({
         userId: null, // No user auth for now
         transactionData: validatedRequest,
         status: "pending",
-        gasLimit: parseInt(validatedRequest.transaction.gasLimit, 16) || 21000,
+        gasLimit: parsedGasLimit,
         blockNumber: validatedRequest.blockNumber,
       });
 

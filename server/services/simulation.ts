@@ -11,6 +11,9 @@ import {
   type EventLog 
 } from '@shared/schema.js';
 
+// Step 2: Import local engine
+import { HyperEVMEngine } from '../core/HyperEVMEngine.js';
+
 const logger = pino({ level: 'info' });
 
 // Extended interfaces for advanced simulation features
@@ -131,10 +134,33 @@ export class SimulationService {
   private simulationCache: Map<string, EnhancedSimulationResult>;
   private precompileAddresses: Map<string, string>;
 
+  // Step 2: Add local engine
+  private engine?: HyperEVMEngine;
+  private engineInitialized: boolean = false;
+
   constructor(hyperliquid: HyperliquidService) {
     this.hyperliquid = hyperliquid;
     this.simulationCache = new Map();
     this.initializePrecompiles();
+  }
+
+  /**
+   * Step 2: Ensures local engine is initialized (lazy-load singleton).
+   */
+  private async ensureEngine() {
+    if (this.engineInitialized && this.engine) return;
+    const chainId = Number(process.env.HYPEREVM_CHAIN_ID || 1);
+    const networkId = Number(process.env.HYPEREVM_NETWORK_ID || 1);
+    const rpcUrl = process.env.HYPERLIQUID_MAINNET_RPC || "https://rpc.hyperliquid.xyz/evm";
+    const stateConfig = { cacheSize: 1000, persistentStorage: false };
+    this.engine = new HyperEVMEngine({
+      chainId,
+      networkId,
+      rpcUrl,
+      stateConfig,
+    });
+    await this.engine.initialize();
+    this.engineInitialized = true;
   }
 
   private initializePrecompiles(): void {
@@ -153,79 +179,146 @@ export class SimulationService {
     const requestId = ('requestId' in request && request.requestId) ? request.requestId : uuidv4();
     
     logger.info(`Starting advanced simulation ${requestId}`);
-    
+
+    // Step 2: Accept executionMode ('rpc' (default), 'local', or 'hybrid')
+    const executionMode = ('executionMode' in request && request.executionMode) ? request.executionMode : 'rpc';
+
     try {
-      const { transaction, blockNumber, enableStateOverrides, simulationMode } = request;
-      
-      // Prepare transaction for simulation
-      const txData = await this.prepareTransaction(transaction, blockNumber);
-      
-      // Get current network state
-      const currentBlock = await this.hyperliquid.getBlockNumber();
-      const gasPrice = simulationMode === 'large' 
-        ? await this.hyperliquid.getBigBlockGasPrice()
-        : await this.hyperliquid.getGasPrice();
+      if (executionMode === 'rpc') {
+        // --------------------- RPC MODE (existing) -----------------------------
+        const { transaction, blockNumber, enableStateOverrides, simulationMode } = request;
+        // Prepare transaction for simulation
+        const txData = await this.prepareTransaction(transaction, blockNumber);
+        // Get current network state
+        const currentBlock = await this.hyperliquid.getBlockNumber();
+        const gasPrice = simulationMode === 'large' 
+          ? await this.hyperliquid.getBigBlockGasPrice()
+          : await this.hyperliquid.getGasPrice();
 
-      // Estimate gas if not provided
-      let gasLimit = parseInt(transaction.gasLimit, 16);
-      if (!transaction.gasLimit || transaction.gasLimit === '0x0') {
-        const estimatedGas = await this.hyperliquid.estimateGas(txData);
-        gasLimit = parseInt(estimatedGas, 16);
+        // Estimate gas if not provided
+        let gasLimit = parseInt(transaction.gasLimit, 16);
+        if (!transaction.gasLimit || transaction.gasLimit === '0x0') {
+          const estimatedGas = await this.hyperliquid.estimateGas(txData);
+          gasLimit = parseInt(estimatedGas, 16);
+        }
+        // Execute simulation
+        const result = await this.executeSimulation(txData, blockNumber);
+        const executionTime = Date.now() - startTime;
+        // Generate execution trace
+        const executionTrace = this.generateExecutionTrace(txData, result);
+        // Calculate gas breakdown
+        const gasBreakdown = this.calculateGasBreakdown(gasLimit, parseInt(result.gasUsed || '0', 16));
+        // Calculate transaction fee
+        const gasPriceDecimal = parseInt(gasPrice, 16);
+        const gasUsedDecimal = parseInt(result.gasUsed || '0', 16);
+        const transactionFee = (gasPriceDecimal * gasUsedDecimal / Math.pow(10, 18)).toFixed(8);
+        // Perform comprehensive analysis
+        const analysis = await this.analyzeTransaction({
+          gasUsed: gasUsedDecimal,
+          gasLimit,
+          executionTrace,
+          events: result.events || [],
+          stateChanges: result.stateChanges || [],
+          executionTime,
+        });
+        const enhancedResult: EnhancedSimulationResult = {
+          requestId,
+          success: result.success,
+          gasUsed: gasUsedDecimal,
+          gasLimit,
+          transactionFee,
+          executionTrace,
+          stateChanges: result.stateChanges || [],
+          events: result.events || [],
+          gasBreakdown,
+          errorMessage: result.errorMessage,
+          returnValue: result.returnValue,
+          analysis,
+          timestamp: Date.now(),
+        };
+        // Cache successful simulations
+        if (result.success) {
+          this.cacheSimulation(requestId, enhancedResult);
+        }
+        logger.info(`Simulation ${requestId} completed in ${executionTime}ms`);
+        return enhancedResult;
+      } else {
+        // --------------------- LOCAL/HYBRID MODE -----------------------------
+        await this.ensureEngine();
+        if (!this.engine) throw new Error("Local HyperEVM engine not available");
+        const { transaction, blockNumber, stateOverrides, accessList, revertOnFailure } = request as any;
+
+        // Normalize tx fields to hex for local engine
+        const txReq = {
+          from: transaction.from,
+          to: transaction.to,
+          value: toHex(transaction.value ?? '0x0'),
+          data: transaction.data ?? '0x',
+          gas: toHex(transaction.gasLimit ?? '0x5208'),
+          gasPrice: toHex(transaction.gasPrice ?? '0x3B9ACA00'), // default 1gwei
+          nonce: toHex(transaction.nonce ?? '0x0'),
+          // Support EIP-1559 for local if present:
+          maxFeePerGas: transaction.maxFeePerGas ? toHex(transaction.maxFeePerGas) : undefined,
+          maxPriorityFeePerGas: transaction.maxPriorityFeePerGas ? toHex(transaction.maxPriorityFeePerGas) : undefined,
+          accessList: accessList ?? [],
+          stateOverrides: stateOverrides ?? [],
+          blockNumber: blockNumber ?? "latest",
+          revertOnFailure: revertOnFailure ?? false,
+          requestId
+        };
+        // Call engine.simulate, map result to EnhancedSimulationResult
+        const result = await this.engine.simulate(txReq);
+        // Use gasPrice from input or engine, parse to number for REST
+        const gasPriceHex = txReq.gasPrice || result.gasPrice || "0x0";
+        const gasUsedNum = hexOrDecToInt(result.gasUsed);
+        const gasLimitNum = hexOrDecToInt(result.gasLimit);
+        const transactionFee = ((hexOrDecToInt(gasPriceHex) * gasUsedNum) / 1e18).toFixed(8);
+
+        // Synthesize basic trace for now; can be expanded in next steps
+        const executionTrace = [
+          {
+            type: 'CALL',
+            depth: 0,
+            from: txReq.from,
+            to: txReq.to,
+            value: txReq.value,
+            gasUsed: gasUsedNum,
+            gasRemaining: gasLimitNum - gasUsedNum,
+          },
+          {
+            type: result.success ? 'RETURN' : 'REVERT',
+            depth: 0,
+            gasUsed: 0,
+            gasRemaining: gasLimitNum - gasUsedNum,
+            output: result.returnValue,
+            error: result.error,
+          }
+        ];
+
+        const enhancedResult: EnhancedSimulationResult = {
+          requestId,
+          success: result.success,
+          gasUsed: gasUsedNum,
+          gasLimit: gasLimitNum,
+          transactionFee,
+          executionTrace,
+          stateChanges: result.stateChanges || [],
+          events: result.events || [],
+          gasBreakdown: this.calculateGasBreakdown(gasLimitNum, gasUsedNum),
+          errorMessage: result.error,
+          returnValue: result.returnValue,
+          analysis: result.analysis || undefined,
+          timestamp: Date.now(),
+        };
+
+        if (result.success) {
+          this.cacheSimulation(requestId, enhancedResult);
+        }
+        logger.info(`Local simulation ${requestId} completed in ${Date.now() - startTime}ms`);
+        return enhancedResult;
       }
-
-      // Execute simulation
-      const result = await this.executeSimulation(txData, blockNumber);
-      
-      const executionTime = Date.now() - startTime;
-      
-      // Generate execution trace
-      const executionTrace = this.generateExecutionTrace(txData, result);
-      
-      // Calculate gas breakdown
-      const gasBreakdown = this.calculateGasBreakdown(gasLimit, parseInt(result.gasUsed || '0', 16));
-      
-      // Calculate transaction fee
-      const gasPriceDecimal = parseInt(gasPrice, 16);
-      const gasUsedDecimal = parseInt(result.gasUsed || '0', 16);
-      const transactionFee = (gasPriceDecimal * gasUsedDecimal / Math.pow(10, 18)).toFixed(8);
-
-      // Perform comprehensive analysis
-      const analysis = await this.analyzeTransaction({
-        gasUsed: gasUsedDecimal,
-        gasLimit,
-        executionTrace,
-        events: result.events || [],
-        stateChanges: result.stateChanges || [],
-        executionTime,
-      });
-
-      const enhancedResult: EnhancedSimulationResult = {
-        requestId,
-        success: result.success,
-        gasUsed: gasUsedDecimal,
-        gasLimit,
-        transactionFee,
-        executionTrace,
-        stateChanges: result.stateChanges || [],
-        events: result.events || [],
-        gasBreakdown,
-        errorMessage: result.errorMessage,
-        returnValue: result.returnValue,
-        analysis,
-        timestamp: Date.now(),
-      };
-
-      // Cache successful simulations
-      if (result.success) {
-        this.cacheSimulation(requestId, enhancedResult);
-      }
-
-      logger.info(`Simulation ${requestId} completed in ${executionTime}ms`);
-      return enhancedResult;
-
     } catch (error) {
       const executionTime = Date.now() - startTime;
-      
       return {
         requestId,
         success: false,
@@ -533,31 +626,40 @@ export class SimulationService {
     return this.simulationCache.get(requestId);
   }
 
+  /**
+   * Step 1: Normalize transaction fields for RPC (all to hex string as expected by JSON-RPC).
+   */
   private async prepareTransaction(transaction: TransactionData, blockNumber: string): Promise<any> {
+    // Helper: normalize to hex string for RPC (accepts hex or decimal string/number).
+    const normalizeHex = (val: string | number | undefined, fallback: string) => {
+      if (val === undefined || val === null) return fallback;
+      if (typeof val === "number") return toHex(val);
+      if (typeof val === "string") return isHex(val) ? val : toHex(val);
+      return fallback;
+    };
+
     const txData: any = {
       from: transaction.from,
-      value: transaction.value || '0x0',
-      gas: transaction.gasLimit || '0x5208', // 21000 in hex
+      value: normalizeHex(transaction.value, '0x0'),
+      gas: normalizeHex(transaction.gasLimit, '0x5208'), // 21000 in hex
     };
 
     if (transaction.to) {
       txData.to = transaction.to;
     }
-
     if (transaction.data) {
       txData.data = transaction.data;
     }
-
     if (transaction.gasPrice) {
-      txData.gasPrice = transaction.gasPrice;
+      txData.gasPrice = normalizeHex(transaction.gasPrice, '0x3B9ACA00'); // default 1gwei
     }
 
-    // Set nonce if not provided
+    // Set nonce (normalize to hex)
     if (!transaction.nonce) {
       const nonce = await this.hyperliquid.getTransactionCount(transaction.from, blockNumber);
-      txData.nonce = nonce;
+      txData.nonce = normalizeHex(nonce, '0x0');
     } else {
-      txData.nonce = transaction.nonce;
+      txData.nonce = normalizeHex(transaction.nonce, '0x0');
     }
 
     return txData;
@@ -593,9 +695,14 @@ export class SimulationService {
     }
   }
 
+  /**
+   * Step 1: Use hexOrDecToInt for gas parsing in trace.
+   */
   private generateExecutionTrace(txData: any, result: any): ExecutionTrace[] {
     const trace: ExecutionTrace[] = [];
-    
+    const gasUsedInt = hexOrDecToInt(result.gasUsed);
+    const gasInt = hexOrDecToInt(txData.gas);
+
     // Add CALL trace
     trace.push({
       type: 'CALL',
@@ -603,8 +710,8 @@ export class SimulationService {
       from: txData.from,
       to: txData.to,
       value: txData.value,
-      gasUsed: parseInt(result.gasUsed || '0', 16),
-      gasRemaining: parseInt(txData.gas || '0', 16) - parseInt(result.gasUsed || '0', 16),
+      gasUsed: gasUsedInt,
+      gasRemaining: gasInt - gasUsedInt,
     });
 
     // Add RETURN or REVERT trace based on success
@@ -612,7 +719,7 @@ export class SimulationService {
       type: result.success ? 'RETURN' : 'REVERT',
       depth: 0,
       gasUsed: 0,
-      gasRemaining: parseInt(txData.gas || '0', 16) - parseInt(result.gasUsed || '0', 16),
+      gasRemaining: gasInt - gasUsedInt,
       output: result.returnValue,
       error: result.errorMessage,
     });
@@ -673,4 +780,36 @@ export class SimulationService {
       chainId,
     };
   }
+}
+
+// ------------------------------------
+// Step 1: Normalization helpers for hex/dec handling.
+// ------------------------------------
+
+// Returns true if value is a valid hex string (0x...)
+function isHex(val: any): boolean {
+  return typeof val === "string" && /^0x[0-9a-fA-F]*$/.test(val);
+}
+
+// Converts decimal string or number to 0x-prefixed hex string.
+function toHex(val: string | number): string {
+  if (typeof val === "number") return "0x" + val.toString(16);
+  if (typeof val === "string") {
+    if (isHex(val)) return val;
+    const num = Number(val);
+    if (!isNaN(num)) return "0x" + num.toString(16);
+  }
+  return "0x0";
+}
+
+// Converts a hex string or decimal string/number to integer.
+function hexOrDecToInt(val: string | number | undefined): number {
+  if (val === undefined || val === null) return 0;
+  if (typeof val === "number") return val;
+  if (typeof val === "string") {
+    if (isHex(val)) return parseInt(val, 16);
+    const num = Number(val);
+    if (!isNaN(num)) return num;
+  }
+  return 0;
 }
