@@ -8,6 +8,324 @@ import pino from 'pino';
 
 const logger = pino({ level: 'info' });
 
+/* ... all interfaces unchanged ... */
+
+export class HyperEVMEngine {
+  private vm!: VM;
+  private common!: Common;
+  private publicClient: any;
+  private config: HyperEVMConfig;
+  // Add: set of precompile addresses for TODO handling
+  private hyperEVMPrecompiles: Set<string> = new Set([
+    '0x0000000000000000000000000000000000000800',
+    '0x0000000000000000000000000000000000000807',
+    '0x3333333333333333333333333333333333333333',
+    '0x2222222222222222222222222222222222222222',
+    '0x5555555555555555555555555555555555555555',
+  ]);
+
+  constructor(config: HyperEVMConfig) {
+    this.config = config;
+    this.setupCommon();
+    this.setupVM();
+    this.setupClient();
+  }
+
+  async initialize(): Promise<void> {
+    logger.info('Initializing HyperEVM Engine...');
+    await this.loadHyperEVMPrecompiles();
+    await this.syncWithNetwork();
+    logger.info('HyperEVM Engine initialized successfully');
+  }
+
+  /* ... setupCommon, setupVM, setupClient, loadHyperEVMPrecompiles, syncWithNetwork are unchanged ... */
+
+  // --- Local Execution with Tracing and State Diffs ---
+  async simulate(request: SimulationRequest): Promise<SimulationResult> {
+    const startTime = Date.now();
+    const requestId = request.requestId || uuidv4();
+
+    logger.info(`Starting local VM simulation ${requestId}`);
+
+    // TODO: Precompile direct call? For now, do not special-case.
+    if (request.to && this.hyperEVMPrecompiles.has(request.to.toLowerCase())) {
+      // TODO: In Step 4, delegate precompile to RPC for real output/gas.
+      logger.warn(`Simulation to HyperEVM precompile ${request.to}, skipping special handling for now.`);
+    }
+
+    // Parse hex or decimal gas/value
+    function parseBigInt(val: string | undefined, fallback: bigint): bigint {
+      if (!val) return fallback;
+      if (typeof val === 'string' && val.startsWith('0x')) return BigInt(val);
+      try { return BigInt(val); } catch { return fallback; }
+    }
+
+    // Set up state diffs, trace, and access tracking
+    const stateChanges: StateChange[] = [];
+    const executionTrace: ExecutionTrace[] = [];
+    const touchedAddresses = new Set<string>();
+    const touchedStorage = new Set<string>();
+
+    // Used for building trace tree
+    type TraceFrame = ExecutionTrace & { subcalls: TraceFrame[]; parent?: TraceFrame };
+    let rootFrame: TraceFrame | null = null;
+    let currentFrame: TraceFrame | null = null;
+
+    // --- Step 1: Hydrate accounts (from/caller and to/target) ---
+    const blockTag = request.blockNumber || 'latest';
+    const callerAddr = Address.fromString(request.from);
+    await this.ensureAccountHydrated(callerAddr, blockTag);
+    if (request.to) {
+      await this.ensureAccountHydrated(Address.fromString(request.to), blockTag);
+    }
+
+    // --- Step 2: State checkpoint and overrides ---
+    await this.vm.stateManager.checkpoint();
+    try {
+      if (request.stateOverrides) {
+        await this.applyStateOverrides(request.stateOverrides);
+      }
+
+      // --- Step 3: Tracing hooks ---
+      // Step tracing: opcode, gasLeft, stack, depth, address
+      this.vm.evm.events.removeAllListeners(); // Defensive: clear old listeners
+
+      // Stack for hierarchical traces
+      let traceStack: TraceFrame[] = [];
+
+      // Context for state diffs
+      let lastMessageAddress: Address = callerAddr;
+
+      this.vm.evm.events.on('beforeMessage', (ev) => {
+        // beforeMessage: new CALL begins
+        const traceFrame: TraceFrame = {
+          type: 'CALL',
+          from: bytesToHex(ev.msg.caller.buf),
+          to: bytesToHex(ev.msg.to.buf),
+          value: '0x' + ev.msg.value.toString(16),
+          gas: '0x' + ev.msg.gasLimit.toString(16),
+          gasUsed: '0x0',
+          input: bytesToHex(ev.msg.data),
+          output: '0x',
+          calls: [],
+          logs: [],
+          subcalls: [],
+        };
+        if (!rootFrame) rootFrame = traceFrame;
+        if (currentFrame) {
+          traceFrame.parent = currentFrame;
+          currentFrame.subcalls.push(traceFrame);
+        }
+        currentFrame = traceFrame;
+        traceStack.push(traceFrame);
+        lastMessageAddress = ev.msg.to;
+      });
+
+      this.vm.evm.events.on('afterMessage', (ev) => {
+        // afterMessage: CALL ends, update output/gasUsed, pop frame
+        if (currentFrame) {
+          currentFrame.output = ev.result.execResult.returnValue
+            ? bytesToHex(ev.result.execResult.returnValue)
+            : '0x';
+          currentFrame.gasUsed = '0x' + ev.result.gasUsed.toString(16);
+          if (ev.result.execResult.exceptionError) {
+            currentFrame.type = 'REVERT';
+          } else {
+            currentFrame.type = 'RETURN';
+          }
+          // Pop to parent
+          traceStack.pop();
+          currentFrame = traceStack[traceStack.length - 1] || null;
+        }
+        lastMessageAddress = ev.msg.to;
+      });
+
+      this.vm.evm.events.on('step', async (ev) => {
+        // Track accessed addresses and storage keys
+        touchedAddresses.add(bytesToHex(ev.address.buf));
+        // SSTORE: record storage diff
+        if (ev.opcode.name === 'SSTORE') {
+          // Key is top of stack before SSTORE, new value is next on stack
+          // stack[stack.length-1] = value, stack[stack.length-2] = key (per EVM spec)
+          const addr = bytesToHex(ev.address.buf);
+          const stack = ev.stack;
+          if (stack.length >= 2) {
+            const key = '0x' + stack[stack.length - 2].toString(16).padStart(64, '0');
+            const newValue = '0x' + stack[stack.length - 1].toString(16);
+            // Before
+            let before = '0x0';
+            try {
+              before = bytesToHex(await this.vm.stateManager.getContractStorage(ev.address, hexToBytes(key)));
+            } catch {}
+            // After: can't access new value yet, but after the call we'll check again and diff
+            // For now, log before; after will be updated after runCall
+            stateChanges.push({
+              address: addr,
+              type: 'storage',
+              key,
+              before,
+              after: newValue,
+            });
+            touchedStorage.add(`${addr.toLowerCase()}:${key}`);
+          }
+        }
+      });
+
+      // --- Step 4: Build CallOpts for runCall ---
+      const callOpts = {
+        to: request.to ? Address.fromString(request.to) : undefined,
+        caller: callerAddr,
+        gasLimit: parseBigInt(request.gas, 21000n),
+        data: request.data ? hexToBytes(request.data) : new Uint8Array(),
+        value: parseBigInt(request.value, 0n),
+        // Optionally set block context, gasPrice/baseFee
+        // baseFee: (request.gasPrice ? parseBigInt(request.gasPrice, 0n) : 0n),
+      };
+
+      // --- Step 5: Execute simulation in local VM with tracing ---
+      let execResult;
+      let error: string | undefined;
+      let returnValue: string | undefined;
+      let gasUsed: bigint = 0n;
+
+      try {
+        execResult = await this.vm.evm.runCall(callOpts);
+        gasUsed = execResult.execResult.gasUsed ?? 0n;
+        returnValue = execResult.execResult.returnValue ? bytesToHex(execResult.execResult.returnValue) : undefined;
+        if (execResult.execResult.exceptionError) {
+          error = execResult.execResult.exceptionError.error;
+        }
+      } catch (e: any) {
+        error = e.message || String(e);
+      }
+
+      // --- Step 6: Postprocess trace tree and state diffs ---
+      // Flatten trace tree into ExecutionTrace[] (1-level for now)
+      function flattenTrace(frame?: TraceFrame): ExecutionTrace[] {
+        if (!frame) return [];
+        const { subcalls, parent, ...plain } = frame;
+        const calls = subcalls?.map(flattenTrace).flat() || [];
+        return [{ ...plain, calls }];
+      }
+      const topTrace = rootFrame ? flattenTrace(rootFrame) : [];
+
+      // After execution: for all SSTORE events recorded, update "after" with current storage slot
+      for (const sc of stateChanges) {
+        if (sc.type === 'storage' && sc.address && sc.key) {
+          try {
+            const afterVal = bytesToHex(await this.vm.stateManager.getContractStorage(Address.fromString(sc.address), hexToBytes(sc.key)));
+            sc.after = afterVal;
+          } catch {}
+        }
+      }
+
+      // --- Step 7: Always revert state after simulation to keep local state clean ---
+      await this.vm.stateManager.revert();
+
+      // --- Step 8: Compose SimulationResult ---
+      const result: SimulationResult = {
+        requestId,
+        success: !error,
+        gasUsed: gasUsed.toString(),
+        gasPrice: request.gasPrice || '0',
+        gasLimit: request.gas || '0x5208',
+        returnValue,
+        executionTrace: topTrace.length ? topTrace[0] : undefined,
+        stateChanges,
+        events: [], // Event/log parsing is not yet implemented (Step 5)
+        analysis: await this.analyzeExecution(execResult, topTrace[0], []),
+        error,
+        timestamp: Date.now(),
+      };
+
+      logger.info(`Simulation ${requestId} completed in ${Date.now() - startTime}ms`);
+      return result;
+    } catch (error: any) {
+      logger.error(`Simulation ${requestId} failed: ${error}`);
+      await this.vm.stateManager.revert();
+      return this.handleSimulationError(error, request, requestId);
+    }
+  }
+
+  // --- Helper: Hydrate account from RPC at specified block ---
+  private async ensureAccountHydrated(address: Address, blockTag: string | 'latest') {
+    try {
+      // viem publicClient API: getBalance, getTransactionCount, getBytecode
+      const [bal, nonce, code] = await Promise.all([
+        this.publicClient.getBalance({ address: address.toString(), blockTag }),
+        this.publicClient.getTransactionCount({ address: address.toString(), blockTag }),
+        this.publicClient.getBytecode({ address: address.toString(), blockTag }),
+      ]);
+      // Put account and code in VM state
+      const account = new Account();
+      account.balance = BigInt(bal);
+      account.nonce = BigInt(nonce);
+      await this.vm.stateManager.putAccount(address, account);
+      if (code && code !== '0x') {
+        await this.vm.stateManager.putContractCode(address, hexToBytes(code));
+      }
+    } catch (e) {
+      logger.warn(`Failed to hydrate account ${address.toString()} at block ${blockTag}: ${e}`);
+    }
+  }
+
+  // --- Existing methods below (applyStateOverrides, handleSimulationError, etc.) ---
+
+  private async applyStateOverrides(overrides: StateOverride[]): Promise<void> {
+    for (const override of overrides) {
+      const address = Address.fromString(override.address);
+
+      // Get current account or create new one
+      let account = await this.vm.stateManager.getAccount(address);
+      if (!account) {
+        account = new Account();
+      }
+
+      // Override balance
+      if (override.balance) {
+        account.balance = BigInt(override.balance);
+      }
+
+      // Override nonce
+      if (override.nonce) {
+        account.nonce = BigInt(override.nonce);
+      }
+
+      // Put updated account
+      await this.vm.stateManager.putAccount(address, account);
+
+      // Override storage
+      if (override.storage) {
+        for (const [key, value] of Object.entries(override.storage)) {
+          await this.vm.stateManager.putContractStorage(
+            address,
+            hexToBytes(key),
+            hexToBytes(value)
+          );
+        }
+      }
+
+      // Override code
+      if (override.code) {
+        await this.vm.stateManager.putContractCode(
+          address,
+          hexToBytes(override.code)
+        );
+      }
+    }
+  }
+
+  // ... createTransaction, buildExecutionTrace, extractStateChanges, decodeEvents, analyzeExecution, handleSimulationError, calculateBundleHash, analyzeBundleDependencies unchanged ...
+}
+import { Transaction, FeeMarketEIP1559Transaction } from '@ethereumjs/tx';
+import { Common, Hardfork } from '@ethereumjs/common';
+import { Account, Address, bytesToHex, hexToBytes } from '@ethereumjs/util';
+import { createPublicClient, http } from 'viem';
+import { v4 as uuidv4 } from 'uuid';
+import pino from 'pino';
+
+const logger = pino({ level: 'info' });
+
 export interface HyperEVMConfig {
   chainId: number;
   networkId: number;
