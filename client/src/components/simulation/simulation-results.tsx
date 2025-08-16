@@ -127,9 +127,10 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
       </div>
 
       {/* Detailed Results */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
       <Card className="bg-hyper-dark-lighter border-hyper-dark-border">
         <CardHeader>
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          
             <TabsList className="bg-transparent border-b border-hyper-dark-border rounded-none p-0">
               <TabsTrigger 
                 value="trace" 
@@ -160,7 +161,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                 Gas Breakdown
               </TabsTrigger>
             </TabsList>
-          </Tabs>
+          
         </CardHeader>
         <CardContent>
           <TabsContent value="trace" className="space-y-4 mt-0">
@@ -334,6 +335,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
           </TabsContent>
         </CardContent>
       </Card>
+      </Tabs>
     </div>
   );
 }

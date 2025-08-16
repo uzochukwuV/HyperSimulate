@@ -5,7 +5,7 @@ import { Account, Address, bytesToHex, hexToBytes, setLengthLeft } from '@ethere
 import { createPublicClient, getAddress, http, PublicClient } from 'viem';
 import { v4 as uuidv4 } from 'uuid';
 import pino, { Logger } from 'pino';
-import { LRUCache } from 'lru-cache';
+import LRU from 'lru-cache';
 import { EventEmitter } from 'events';
 
 // Production logger configuration
@@ -243,9 +243,9 @@ export class HyperEVMEngine extends EventEmitter {
   private common!: Common;
   private publicClient!: PublicClient;
   private config: HyperEVMConfig;
-  private accountCache: LRUCache<string, Account>;
-  private codeCache: LRUCache<string, Uint8Array>;
-  private storageCache: LRUCache<string, Uint8Array>;
+  private accountCache: LRU<string, Account>;
+  private codeCache: LRU<string, Uint8Array>;
+  private storageCache: LRU<string, Uint8Array>;
   private initialized = false;
   private activeSimulations = new Map<string, AbortController>();
   
@@ -288,9 +288,9 @@ export class HyperEVMEngine extends EventEmitter {
     this.config = this.validateConfig(config);
     
     // Initialize caches
-    this.accountCache = new LRUCache({ max: config.stateConfig.cacheSize });
-    this.codeCache = new LRUCache({ max: config.stateConfig.cacheSize });
-    this.storageCache = new LRUCache({ max: config.stateConfig.cacheSize * 10 });
+    this.accountCache = new LRU({ max: config.stateConfig.cacheSize });
+    this.codeCache = new LRU({ max: config.stateConfig.cacheSize });
+    this.storageCache = new LRU({ max: config.stateConfig.cacheSize * 10 });
     
     this.setupCommon();
     this.setupVM();
