@@ -151,6 +151,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const transaction = transactionSchema.parse(req.body);
       const estimate = await simulationService.getGasEstimate(transaction);
+      console.log(estimate)
       res.json(estimate);
     } catch (error) {
       res.status(400).json({ 
