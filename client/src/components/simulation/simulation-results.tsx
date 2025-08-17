@@ -160,6 +160,13 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
               >
                 Gas Breakdown
               </TabsTrigger>
+              <TabsTrigger 
+                value="hyperevm" 
+                className="data-[state=active]:text-hyper-teal data-[state=active]:border-b-2 data-[state=active]:border-hyper-teal rounded-none"
+                data-testid="tab-hyperevm-analysis"
+              >
+                HyperEVM Analysis
+              </TabsTrigger>
             </TabsList>
           
         </CardHeader>
@@ -331,6 +338,156 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                   </div>
                 </CardContent>
               </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="hyperevm" className="mt-0">
+            <div className="space-y-6">
+              {/* HyperEVM-specific metrics */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="bg-hyper-dark border-hyper-teal">
+                  <CardContent className="p-4">
+                    <h4 className="text-lg font-medium text-hyper-teal mb-3">Precompile Analysis</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">Oracle Calls:</span>
+                        <span className="font-mono">{simResult.analysis?.gasAnalysis?.precompileBreakdown?.reads || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">CoreWriter Calls:</span>
+                        <span className="font-mono">{simResult.analysis?.gasAnalysis?.precompileBreakdown?.writes || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">Precompile Gas:</span>
+                        <span className="font-mono text-hyper-teal">
+                          {formatGas((simResult.analysis?.gasAnalysis?.coreWriterGas || 0) + (simResult.analysis?.gasAnalysis?.oracleReadGas || 0))}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-hyper-dark border-hyper-dark-border">
+                  <CardContent className="p-4">
+                    <h4 className="text-lg font-medium text-hyper-grey mb-3">Network Metrics</h4>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">Chain ID:</span>
+                        <span className="font-mono">999 (HyperEVM)</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">Gas Token:</span>
+                        <span className="font-mono text-hyper-green">HYPE</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-hyper-grey">Estimated Cost:</span>
+                        <span className="font-mono text-hyper-teal">
+                          {simResult.analysis?.gasAnalysis?.estimatedCost || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Security insights specific to HyperEVM */}
+              {simResult.analysis?.securityInsights && simResult.analysis.securityInsights.length > 0 && (
+                <Card className="bg-hyper-dark border-hyper-dark-border">
+                  <CardContent className="p-4">
+                    <h4 className="text-lg font-medium text-hyper-grey mb-3">Security Analysis</h4>
+                    <div className="space-y-3">
+                      {simResult.analysis.securityInsights.map((insight, index) => (
+                        <div key={index} className="p-3 rounded border border-hyper-dark-border bg-hyper-dark-lighter">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium">{insight.type}</span>
+                            <Badge className={`${
+                              insight.severity === 'HIGH' ? 'bg-hyper-red' : 
+                              insight.severity === 'MEDIUM' ? 'bg-yellow-600' : 'bg-hyper-green'
+                            } text-white`}>
+                              {insight.severity}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-hyper-grey mb-2">{insight.description}</p>
+                          {insight.recommendation && (
+                            <p className="text-xs text-hyper-teal">{insight.recommendation}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Optimization suggestions */}
+              {simResult.analysis?.optimizationSuggestions && simResult.analysis.optimizationSuggestions.length > 0 && (
+                <Card className="bg-hyper-dark border-hyper-dark-border">
+                  <CardContent className="p-4">
+                    <h4 className="text-lg font-medium text-hyper-grey mb-3">💡 Optimization Suggestions</h4>
+                    <div className="space-y-3">
+                      {simResult.analysis.optimizationSuggestions.map((suggestion, index) => (
+                        <div key={index} className="p-3 rounded border border-hyper-teal bg-hyper-dark-lighter">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-hyper-teal">{suggestion.type}</span>
+                            <span className="text-xs text-hyper-green">{suggestion.potentialSavings}</span>
+                          </div>
+                          <p className="text-sm text-hyper-grey mb-2">{suggestion.description}</p>
+                          {suggestion.implementation && (
+                            <p className="text-xs text-hyper-grey italic">{suggestion.implementation}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Risk Assessment */}
+              {simResult.analysis?.riskAssessment && (
+                <Card className="bg-hyper-dark border-hyper-dark-border">
+                  <CardContent className="p-4">
+                    <h4 className="text-lg font-medium text-hyper-grey mb-3">🔍 Risk Assessment</h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-hyper-grey">Overall Risk:</span>
+                        <Badge className={`${
+                          simResult.analysis.riskAssessment.overallRisk === 'HIGH' ? 'bg-hyper-red' : 
+                          simResult.analysis.riskAssessment.overallRisk === 'MEDIUM' ? 'bg-yellow-600' : 'bg-hyper-green'
+                        } text-white`}>
+                          {simResult.analysis.riskAssessment.overallRisk}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-hyper-grey">Confidence Score:</span>
+                        <span className="font-mono text-hyper-teal">
+                          {simResult.analysis.riskAssessment.confidenceScore}%
+                        </span>
+                      </div>
+                      
+                      {simResult.analysis.riskAssessment.riskFactors.length > 0 && (
+                        <div>
+                          <h5 className="text-sm font-medium text-hyper-grey mb-2">Risk Factors:</h5>
+                          <ul className="list-disc list-inside space-y-1">
+                            {simResult.analysis.riskAssessment.riskFactors.map((factor, index) => (
+                              <li key={index} className="text-sm text-hyper-grey">{factor}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {simResult.analysis.riskAssessment.mitigationSuggestions.length > 0 && (
+                        <div>
+                          <h5 className="text-sm font-medium text-hyper-teal mb-2">Mitigation Suggestions:</h5>
+                          <ul className="list-disc list-inside space-y-1">
+                            {simResult.analysis.riskAssessment.mitigationSuggestions.map((suggestion, index) => (
+                              <li key={index} className="text-sm text-hyper-grey">{suggestion}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
         </CardContent>

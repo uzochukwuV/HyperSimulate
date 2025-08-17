@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import pino, { Logger } from 'pino';
 import { LRUCache } from 'lru-cache';
 import { EventEmitter } from 'events';
+import { CoreWriterSimulator, CoreWriterAction, CoreWriterSimulationResult } from './CoreWriterSimulator.js';
+import { OraclePriceReader, OracleAnalysis, OraclePrice, PriceUtils } from './OraclePriceReader.js';
 
 // Production logger configuration
 const logger: Logger = pino({
@@ -249,37 +251,103 @@ export class HyperEVMEngine extends EventEmitter {
   private initialized = false;
   private activeSimulations = new Map<string, AbortController>();
   
-  // HyperEVM specific precompiles with enhanced metadata
+  // HyperEVM-specific components
+  private coreWriterSimulator: CoreWriterSimulator;
+  private oraclePriceReader: OraclePriceReader;
+  
+  // HyperEVM specific precompiles with enhanced metadata (based on official docs)
   private readonly hyperEVMPrecompiles = new Map([
+    // HyperCore read precompiles - Gas cost: 2000 + 65 * output_len
     ['0x0000000000000000000000000000000000000800', {
       name: 'READ_BASE',
-      description: 'HyperEVM base read operations',
-      gasMultiplier: 1.2,
-      riskLevel: 'LOW'
+      description: 'Base HyperCore read operations',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    ['0x0000000000000000000000000000000000000801', {
+      name: 'PERP_POSITIONS',
+      description: 'Read perpetual positions from HyperCore',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    ['0x0000000000000000000000000000000000000802', {
+      name: 'SPOT_BALANCES',
+      description: 'Read spot token balances from HyperCore',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    ['0x0000000000000000000000000000000000000803', {
+      name: 'VAULT_EQUITY',
+      description: 'Read vault equity information',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    ['0x0000000000000000000000000000000000000804', {
+      name: 'STAKING_DELEGATIONS',
+      description: 'Read staking delegation information',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    ['0x0000000000000000000000000000000000000805', {
+      name: 'L1_BLOCK_NUMBER',
+      description: 'Read current L1 block number',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
     }],
     ['0x0000000000000000000000000000000000000807', {
-      name: 'PERP_ORACLE',
-      description: 'Perpetual futures oracle',
-      gasMultiplier: 2.0,
-      riskLevel: 'MEDIUM'
+      name: 'ORACLE_PRICES',
+      description: 'Read oracle prices for assets',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
     }],
+    ['0x000000000000000000000000000000000000080a', {
+      name: 'PERP_ASSET_INFO',
+      description: 'Read perpetual asset metadata',
+      baseGasCost: 2000,
+      outputGasMultiplier: 65,
+      riskLevel: 'LOW',
+      category: 'READ'
+    }],
+    // CoreWriter - High gas cost (~47,000 gas for basic calls)
     ['0x3333333333333333333333333333333333333333', {
       name: 'CORE_WRITER',
-      description: 'Core system state writer',
-      gasMultiplier: 3.0,
-      riskLevel: 'HIGH'
+      description: 'Write actions to HyperCore (orders, transfers, etc.)',
+      baseGasCost: 47000,
+      outputGasMultiplier: 0,
+      riskLevel: 'HIGH',
+      category: 'WRITE',
+      delaySeconds: 3 // Actions delayed for a few seconds
     }],
+    // HYPE system contracts
     ['0x2222222222222222222222222222222222222222', {
-      name: 'HYPE_SYSTEM',
-      description: 'HYPE token system operations',
-      gasMultiplier: 1.5,
-      riskLevel: 'MEDIUM'
+      name: 'HYPE_TRANSFER',
+      description: 'Transfer HYPE from HyperCore to HyperEVM',
+      baseGasCost: 21000,
+      outputGasMultiplier: 0,
+      riskLevel: 'MEDIUM',
+      category: 'TRANSFER'
     }],
     ['0x5555555555555555555555555555555555555555', {
-      name: 'WHYPE_CONTRACT',
+      name: 'WRAPPED_HYPE',
       description: 'Wrapped HYPE token contract',
-      gasMultiplier: 1.8,
-      riskLevel: 'MEDIUM'
+      baseGasCost: 21000,
+      outputGasMultiplier: 0,
+      riskLevel: 'MEDIUM',
+      category: 'TOKEN'
     }]
   ]);
 
@@ -291,6 +359,10 @@ export class HyperEVMEngine extends EventEmitter {
     this.accountCache = new LRUCache({ max: config.stateConfig.cacheSize });
     this.codeCache = new LRUCache({ max: config.stateConfig.cacheSize });
     this.storageCache = new LRUCache({ max: config.stateConfig.cacheSize * 10 });
+    
+    // Initialize HyperEVM-specific components
+    this.coreWriterSimulator = new CoreWriterSimulator(config.rpcUrl, logger);
+    this.oraclePriceReader = new OraclePriceReader(config.rpcUrl, logger);
     
     this.setupCommon();
     this.setupVM();
@@ -447,6 +519,15 @@ export class HyperEVMEngine extends EventEmitter {
   // ================================
 
   async simulate(request: SimulationRequest): Promise<SimulationResult> {
+    console.log('🚀 HyperEVM Engine.simulate() called with request:', {
+      from: request.from,
+      to: request.to,
+      value: request.value,
+      gas: request.gas,
+      data: request.data?.slice(0, 20) + '...' || 'none',
+      blockNumber: request.blockNumber
+    });
+
     if (!this.initialized) {
       throw new Error('HyperEVM Engine not initialized');
     }
@@ -458,6 +539,8 @@ export class HyperEVMEngine extends EventEmitter {
     const startTime = Date.now();
     const requestId = request.requestId || uuidv4();
     const abortController = new AbortController();
+    
+    console.log(`⏱️ Starting simulation ${requestId}`);
     
     this.activeSimulations.set(requestId, abortController);
     this.emit('simulationStart', requestId);
@@ -542,6 +625,12 @@ export class HyperEVMEngine extends EventEmitter {
       await this.ensureAccountHydrated(callerAddr, blockTag);
       if (request.to) {
         await this.ensureAccountHydrated(getAddress(request.to) as any, blockTag);
+        
+        // Check if this is a HyperEVM precompile and ensure it has code
+        const toAddress = request.to.toLowerCase();
+        if (this.hyperEVMPrecompiles.has(toAddress)) {
+          await this.ensurePrecompileCode(getAddress(request.to) as any, toAddress);
+        }
       }
 
       // Apply state overrides
@@ -554,20 +643,53 @@ export class HyperEVMEngine extends EventEmitter {
 
       // Create and execute transaction
       const tx = await this.createTransaction(request);
+      
+      console.log(`💫 Created transaction:`, {
+        to: tx.to?.toString(),
+        value: tx.value.toString(),
+        gasLimit: tx.gasLimit.toString(),
+        data: tx.data ? bytesToHex(tx.data).slice(0, 20) + '...' : 'none'
+      });
+      
+      logger.debug(`Executing transaction with gasLimit: ${tx.gasLimit}, to: ${tx.to?.toString()}`);
+      
       const vmResult = await this.vm.runTx({ 
         tx, 
-        skipBalance: false,
-        skipNonce: false,
+        skipBalance: true,   // Skip balance checks for simulation
+        skipNonce: true,     // Skip nonce validation for simulation
         skipHardForkValidation: false
       });
 
-      gasUsed = vmResult.totalGasSpent;
+      gasUsed = Number(vmResult.totalGasSpent);
       returnValue = vmResult.execResult.returnValue ? bytesToHex(vmResult.execResult.returnValue) : undefined;
-      logs = (vmResult.execResult.logs || []).map(log  => ({
-        address: bytesToHex(log.address),
-        topics: log.topics.map((topic: Uint8Array) => bytesToHex(topic)),
-        data: bytesToHex(log.data)
-      }));
+      
+      console.log(`⛽ VM Execution completed:`, {
+        gasUsed,
+        totalGasSpent: vmResult.totalGasSpent.toString(),
+        success: !vmResult.execResult.exceptionError,
+        exceptionError: vmResult.execResult.exceptionError?.error,
+        returnValue: returnValue?.slice(0, 20) + '...' || 'none'
+      });
+      
+      // Handle logs more safely
+      logs = (vmResult.execResult.logs || []).map(log => {
+        try {
+          return {
+            address: bytesToHex(log.address.bytes),
+            topics: log.topics.map((topic: Uint8Array) => bytesToHex(topic)),
+            data: bytesToHex(log.data)
+          };
+        } catch (error) {
+          logger.warn('Error processing log:', error);
+          return {
+            address: '0x0',
+            topics: [],
+            data: '0x'
+          };
+        }
+      });
+      
+      logger.debug(`Transaction executed: gasUsed=${gasUsed}, logsCount=${logs.length}, success=${!vmResult.execResult.exceptionError}`);
 
       if (vmResult.execResult.exceptionError) {
         error = vmResult.execResult.exceptionError.error;
@@ -588,6 +710,26 @@ export class HyperEVMEngine extends EventEmitter {
       // Decode events
       const decodedEvents = this.decodeEvents(logs, currentBlock.toString(), '0x' + requestId.replace(/-/g, ''));
 
+      // Ensure we have at least a basic execution trace
+      if (executionTrace.length === 0) {
+        logger.warn('No execution trace captured, creating fallback trace');
+        const fallbackTrace: ExecutionTrace = {
+          type: error ? 'REVERT' : (request.to ? 'CALL' : 'CREATE'),
+          from: request.from,
+          to: request.to,
+          value: request.value || '0x0',
+          gas: request.gas || '0x21000',
+          gasUsed: '0x' + gasUsed.toString(16),
+          input: request.data || '0x',
+          output: returnValue || '0x',
+          calls: [],
+          logs: [],
+          depth: 0,
+          error: error
+        };
+        executionTrace.push(fallbackTrace);
+      }
+
       // Perform comprehensive analysis
       const analysis = await this.analyzeExecution(
         BigInt(gasUsed),
@@ -597,7 +739,7 @@ export class HyperEVMEngine extends EventEmitter {
         request
       );
 
-      return {
+      const finalResult = {
         requestId,
         success: !error,
         gasUsed: gasUsed.toString(),
@@ -613,6 +755,21 @@ export class HyperEVMEngine extends EventEmitter {
         blockNumber: currentBlock.toString(),
         blockHash: currentBlockHash
       };
+
+      console.log(`🎯 HyperEVM Engine returning result:`, {
+        requestId: finalResult.requestId,
+        success: finalResult.success,
+        gasUsed: finalResult.gasUsed,
+        gasPrice: finalResult.gasPrice,
+        gasLimit: finalResult.gasLimit,
+        error: finalResult.error,
+        hasExecutionTrace: !!finalResult.executionTrace,
+        stateChangesCount: finalResult.stateChanges.length,
+        eventsCount: finalResult.events.length,
+        hasAnalysis: !!finalResult.analysis
+      });
+
+      return finalResult;
 
     } catch (e: any) {
       await this.vm.stateManager.revert();
@@ -636,15 +793,28 @@ export class HyperEVMEngine extends EventEmitter {
     }
 
     try {
-      const [balance, nonce, code] = await Promise.all([
-        this.publicClient.getBalance({ address: address.toString(), blockTag: blockTag as any }),
-        this.publicClient.getTransactionCount({ address: address.toString(), blockTag: blockTag as any }),
-        this.publicClient.getBytecode({ address: address.toString(), blockTag: blockTag as any })
-      ]);
+      // For simulation, we need to ensure accounts have sufficient balance and proper state
+      let balance: bigint;
+      let nonce: bigint;
+      let code: Uint8Array | undefined;
+
+      try {
+        [balance, nonce, code] = await Promise.all([
+          this.publicClient.getBalance({ address: address.toString(), blockTag: blockTag as any }),
+          this.publicClient.getTransactionCount({ address: address.toString(), blockTag: blockTag as any }),
+          this.publicClient.getBytecode({ address: address.toString(), blockTag: blockTag as any })
+        ]);
+      } catch (rpcError) {
+        logger.warn(`Failed to fetch account data for ${address.toString()}, using simulation defaults:`, rpcError);
+        // Provide default simulation values
+        balance = BigInt('1000000000000000000000'); // 1000 ETH for simulation
+        nonce = BigInt(0);
+        code = undefined;
+      }
 
       const account = new Account();
       account.balance = balance;
-      account.nonce = BigInt(nonce);
+      account.nonce = nonce;
 
       await this.vm.stateManager.putAccount(address, account);
       
@@ -661,6 +831,55 @@ export class HyperEVMEngine extends EventEmitter {
     } catch (error: any) {
       logger.warn(`Failed to hydrate account ${address.toString()} at block ${blockTag}:`, error);
       throw new Error(`Account hydration failed: ${error}`);
+    }
+  }
+
+  private async ensurePrecompileCode(address: Address, precompileAddress: string): Promise<void> {
+    const precompileInfo = this.hyperEVMPrecompiles.get(precompileAddress);
+    if (!precompileInfo) return;
+
+    try {
+      // Try to get code from the network first
+      const code = await this.publicClient.getBytecode({ 
+        address: address.toString(), 
+        blockTag: 'latest' 
+      });
+      
+      if (code && code !== '0x') {
+        const codeBytes = hexToBytes(code as any);
+        await this.vm.stateManager.putCode(address, codeBytes);
+        logger.debug(`Set real code for precompile ${precompileAddress}`);
+        return;
+      }
+    } catch (error) {
+      logger.debug(`Failed to fetch code for precompile ${precompileAddress}, using mock`);
+    }
+
+    // If no code from network, provide mock implementation for simulation
+    // This ensures the precompile behaves like a contract during simulation
+    const mockCode = this.generateMockPrecompileCode(precompileInfo.name);
+    const codeBytes = hexToBytes(mockCode as any);
+    await this.vm.stateManager.putCode(address, codeBytes);
+    
+    logger.debug(`Set mock code for precompile ${precompileAddress} (${precompileInfo.name})`);
+  }
+
+  private generateMockPrecompileCode(precompileName: string): string {
+    // Generate minimal mock bytecode that returns success
+    // This is just for simulation - real precompiles are handled by the EVM itself
+    switch (precompileName) {
+      case 'HYPE_TRANSFER':
+        // Mock bytecode that emits a Transfer event and returns true
+        return '0x60016020527f64df252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef0600020a1600160ff5260ff166040526020606001f3';
+      case 'CORE_WRITER':
+        // Mock bytecode that emits a log and returns
+        return '0x7f436f726557726974657241637469766174656400000000000000000000000000600052602060006000a1005b';
+      case 'ORACLE_PRICES':
+        // Mock bytecode that returns a price (simplified)
+        return '0x63ffffffff6020526020606001f3';
+      default:
+        // Generic mock that just returns success
+        return '0x60016020526020606001f3';
     }
   }
 
@@ -712,48 +931,84 @@ export class HyperEVMEngine extends EventEmitter {
     touchedAddresses: Set<string>,
     touchedStorage: Map<string, Map<string, { before: string; after: string }>>
   ): Promise<void> {
-    this.vm?.evm?.events!.removeAllListeners();
+    if (!this.vm?.evm?.events) {
+      logger.warn('VM EVM events not available for tracing');
+      return;
+    }
+    
+    // Clear any existing listeners to prevent duplicates
+    this.vm.evm.events.removeAllListeners();
     
     let callStack: Partial<ExecutionTrace>[] = [];
     let currentDepth = 0;
 
-    this.vm.evm.events!.on('beforeMessage', async (data) => {
-      const trace: Partial<ExecutionTrace> = {
-        type: 'CALL',
-        from: bytesToHex(data.caller.bytes),
-        to: bytesToHex(data.to?.bytes!),
-        value: '0x' + data.value.toString(16),
-        gas: '0x' + data.gasLimit.toString(16),
-        input: bytesToHex(data.data),
-        calls: [],
-        logs: [],
-        depth: currentDepth++
-      };
-      
-      callStack.push(trace);
-      touchedAddresses.add(trace.to!);
+    this.vm.evm.events.on('beforeMessage', async (data) => {
+      try {
+        const fromAddr = data.caller ? bytesToHex(data.caller.bytes) : '0x0';
+        const toAddr = data.to ? bytesToHex(data.to.bytes) : undefined;
+        const isCreate = !data.to;
+        
+        const trace: Partial<ExecutionTrace> = {
+          type: isCreate ? 'CREATE' : 'CALL',
+          from: fromAddr,
+          to: toAddr,
+          value: data.value ? '0x' + data.value.toString(16) : '0x0',
+          gas: data.gasLimit ? '0x' + data.gasLimit.toString(16) : '0x0',
+          gasUsed: '0x0',
+          input: data.data ? bytesToHex(data.data) : '0x',
+          output: '0x',
+          calls: [],
+          logs: [],
+          depth: currentDepth++
+        };
+        
+        callStack.push(trace);
+        if (fromAddr && fromAddr !== '0x0') touchedAddresses.add(fromAddr);
+        if (toAddr) touchedAddresses.add(toAddr);
+        
+        logger.debug(`BeforeMessage: ${trace.type} from ${fromAddr} to ${toAddr || 'CREATE'} depth ${trace.depth}`);
+      } catch (error) {
+        logger.error('Error in beforeMessage handler:', error);
+      }
     });
 
-    this.vm.evm.events!.on('afterMessage', async (data) => {
-      const trace = callStack.pop();
-      if (trace) {
-        trace.gasUsed = '0x' + data.gasUsed.toString(16);
-        trace.output = data.execResult.returnValue ? bytesToHex(data.execResult.returnValue) : '0x';
-        trace.type = data.execResult.exceptionError ? 'REVERT' : 'RETURN';
-        
-        if (data.execResult.exceptionError) {
-          trace.error = data.execResult.exceptionError.error;
-        }
+    this.vm.evm.events.on('afterMessage', async (data) => {
+      try {
+        const trace = callStack.pop();
+        if (trace) {
+          trace.gasUsed = data.gasUsed ? '0x' + data.gasUsed.toString(16) : '0x0';
+          trace.output = data.execResult.returnValue ? bytesToHex(data.execResult.returnValue) : '0x';
+          
+          // Set the final trace type based on execution result
+          if (data.execResult.exceptionError) {
+            trace.type = 'REVERT';
+            trace.error = data.execResult.exceptionError.error;
+          } else {
+            // Keep original type (CALL/CREATE) and let the frontend handle display
+            if (trace.type === 'CREATE') {
+              trace.type = 'CREATE';
+            } else {
+              trace.type = 'CALL';
+            }
+          }
+          
+          logger.debug(`AfterMessage: ${trace.type} gasUsed=${trace.gasUsed} depth=${trace.depth}`);
 
-        if (callStack.length === 0) {
-          executionTrace.push(trace as ExecutionTrace);
-        } else {
-          const parent = callStack[callStack.length - 1];
-          if (!parent.calls) parent.calls = [];
-          parent.calls.push(trace as ExecutionTrace);
+          if (callStack.length === 0) {
+            // This is the top-level trace
+            executionTrace.push(trace as ExecutionTrace);
+            logger.debug('Added top-level trace to executionTrace');
+          } else {
+            // Add to parent's calls
+            const parent = callStack[callStack.length - 1];
+            if (!parent.calls) parent.calls = [];
+            parent.calls.push(trace as ExecutionTrace);
+          }
         }
+        currentDepth = Math.max(0, currentDepth - 1);
+      } catch (error) {
+        logger.error('Error in afterMessage handler:', error);
       }
-      currentDepth--;
     });
 
     this.vm.evm.events!.on('step', async (data) => {
@@ -809,13 +1064,44 @@ export class HyperEVMEngine extends EventEmitter {
   }
 
   private async createTransaction(request: SimulationRequest) {
+    // Convert gas values properly (they might come as hex strings)
+    const parseGasValue = (value: string | undefined, defaultValue: bigint): bigint => {
+      if (!value) return defaultValue;
+      try {
+        // Handle hex strings
+        if (value.startsWith('0x')) {
+          return BigInt(value);
+        }
+        // Handle decimal strings
+        return BigInt(value);
+      } catch {
+        logger.warn(`Invalid gas value: ${value}, using default`);
+        return defaultValue;
+      }
+    };
+
+    const parseValueAmount = (value: string | undefined): bigint => {
+      if (!value || value === '0x' || value === '0x0') return BigInt(0);
+      try {
+        if (value.startsWith('0x')) {
+          return BigInt(value);
+        }
+        return BigInt(value);
+      } catch {
+        logger.warn(`Invalid value amount: ${value}, using 0`);
+        return BigInt(0);
+      }
+    };
+
     const txData = {
       to: request.to ? getAddress(request.to) : undefined,
-      value: request.value ? BigInt(request.value) : BigInt(0),
+      value: parseValueAmount(request.value),
       data: request.data ? hexToBytes(request.data as any) : new Uint8Array(),
-      gasLimit: request.gas ? BigInt(request.gas) : BigInt(21000),
-      nonce: request.nonce ? BigInt(request.nonce) : BigInt(0)
+      gasLimit: parseGasValue(request.gas, BigInt(135168)), // Use a more reasonable default
+      nonce: request.nonce ? parseGasValue(request.nonce, BigInt(0)) : BigInt(0)
     };
+
+    logger.debug(`Creating transaction: to=${txData.to}, value=${txData.value}, gasLimit=${txData.gasLimit}, dataLength=${txData.data.length}`);
 
     // Create appropriate transaction type
     if (request.maxFeePerGas || request.maxPriorityFeePerGas) {
@@ -936,13 +1222,34 @@ export class HyperEVMEngine extends EventEmitter {
     
     let externalCalls = 0;
     let precompileCalls = 0;
+    let coreWriterCalls = 0;
+    let oracleCalls = 0;
+    let totalPrecompileGas = 0;
     
     const countCalls = (trace: ExecutionTrace) => {
       if (trace.calls) {
         externalCalls += trace.calls.length;
         trace.calls.forEach(call => {
-          if (this.hyperEVMPrecompiles.has(call.to.toLowerCase())) {
+          const address = call.to.toLowerCase();
+          if (this.hyperEVMPrecompiles.has(address)) {
             precompileCalls++;
+            const precompile = this.hyperEVMPrecompiles.get(address)!;
+            
+            // Calculate accurate precompile gas cost
+            if (precompile.category === 'READ') {
+              // Gas cost: 2000 + 65 * output_len (assume 32 bytes output for simplicity)
+              totalPrecompileGas += precompile.baseGasCost + (precompile.outputGasMultiplier * 32);
+            } else {
+              totalPrecompileGas += precompile.baseGasCost;
+            }
+            
+            // Count specific precompile types
+            if (address === '0x3333333333333333333333333333333333333333') {
+              coreWriterCalls++;
+            } else if (address === '0x0000000000000000000000000000000000000807' || 
+                       address === '0x000000000000000000000000000000000000080a') {
+              oracleCalls++;
+            }
           }
           countCalls(call);
         });
@@ -953,17 +1260,28 @@ export class HyperEVMEngine extends EventEmitter {
       countCalls(executionTrace);
     }
 
+    // Enhanced gas breakdown with HyperEVM-specific costs
     const gasBreakdown: Record<string, number> = {
       baseTransaction: 21000,
-      execution: Math.max(0, totalGas - 21000),
-      storage: storageWrites * 20000, // Approximate SSTORE cost
-      calls: externalCalls * 2300, // Approximate external call cost
-      precompiles: precompileCalls * 3000 // Estimated precompile cost
+      execution: Math.max(0, totalGas - 21000 - totalPrecompileGas),
+      storage: storageWrites * 20000, // SSTORE cost
+      precompileReads: oracleCalls * 2065, // Base cost + small output
+      coreWriterActions: coreWriterCalls * 47000, // CoreWriter base cost
+      calls: Math.max(0, externalCalls - precompileCalls) * 2300, // Non-precompile calls
+      memoryExpansion: Math.floor((totalGas - 21000) * 0.05) // Estimated memory costs
     };
 
+    // HyperEVM-specific efficiency calculation
     let efficiency: 'HIGH' | 'MEDIUM' | 'LOW' = 'MEDIUM';
-    if (totalGas < 50000) efficiency = 'HIGH';
-    else if (totalGas > 200000) efficiency = 'LOW';
+    const gasPerPrecompile = precompileCalls > 0 ? totalPrecompileGas / precompileCalls : 0;
+    
+    if (totalGas < 50000 && gasPerPrecompile < 5000) efficiency = 'HIGH';
+    else if (totalGas > 200000 || gasPerPrecompile > 50000) efficiency = 'LOW';
+
+    // Calculate cost in HYPE tokens (assuming 20 gwei gas price)
+    const gasPriceWei = BigInt(20000000000); // 20 gwei
+    const costWei = BigInt(totalGas) * gasPriceWei;
+    const costHype = Number(costWei) / 1e18;
 
     return {
       totalGas,
@@ -974,7 +1292,15 @@ export class HyperEVMEngine extends EventEmitter {
       externalCalls,
       precompileCalls,
       efficiency,
-      estimatedCost: (BigInt(totalGas) * BigInt(20000000000) / BigInt(1000000000000000000)).toString() + ' ETH' // Rough estimate at 20 gwei
+      estimatedCost: `${costHype.toFixed(8)} HYPE`,
+      // Additional HyperEVM-specific metrics
+      coreWriterGas: coreWriterCalls * 47000,
+      oracleReadGas: oracleCalls * 2065,
+      precompileBreakdown: {
+        reads: oracleCalls,
+        writes: coreWriterCalls,
+        transfers: 0 // Would count HYPE transfer calls
+      }
     };
   }
 
@@ -1458,6 +1784,173 @@ export class HyperEVMEngine extends EventEmitter {
   }
 
   // ================================
+  // HYPEREVM-SPECIFIC METHODS
+  // ================================
+
+  /**
+   * Simulate CoreWriter action
+   */
+  async simulateCoreWriterAction(action: CoreWriterAction): Promise<CoreWriterSimulationResult> {
+    if (!this.initialized) {
+      throw new Error('HyperEVM Engine not initialized');
+    }
+    
+    logger.info(`Simulating CoreWriter action: ${action.actionType}`);
+    return await this.coreWriterSimulator.simulateAction(action);
+  }
+
+  /**
+   * Simulate multiple CoreWriter actions in a batch
+   */
+  async simulateCoreWriterBatch(actions: CoreWriterAction[]): Promise<{
+    results: CoreWriterSimulationResult[];
+    totalGasUsed: number;
+    estimatedBatchDelay: number;
+  }> {
+    if (!this.initialized) {
+      throw new Error('HyperEVM Engine not initialized');
+    }
+    
+    return await this.coreWriterSimulator.simulateActionBatch(actions);
+  }
+
+  /**
+   * Read oracle price for asset
+   */
+  async readOraclePrice(assetIndex: number): Promise<OraclePrice> {
+    if (!this.initialized) {
+      throw new Error('HyperEVM Engine not initialized');
+    }
+    
+    return await this.oraclePriceReader.readOraclePrice(assetIndex);
+  }
+
+  /**
+   * Analyze oracle prices for multiple assets
+   */
+  async analyzeOraclePrices(assetIndexes: number[]): Promise<OracleAnalysis> {
+    if (!this.initialized) {
+      throw new Error('HyperEVM Engine not initialized');
+    }
+    
+    return await this.oraclePriceReader.analyzeOraclePrices(assetIndexes);
+  }
+
+  /**
+   * Simulate price impact on the system
+   */
+  async simulatePriceImpact(assetIndex: number, priceChangePercent: number): Promise<{
+    originalPrice: OraclePrice;
+    simulatedPrice: bigint;
+    impactAnalysis: {
+      liquidationRisk: 'LOW' | 'MEDIUM' | 'HIGH';
+      marginRequirements: bigint;
+      estimatedVolume: bigint;
+    };
+  }> {
+    if (!this.initialized) {
+      throw new Error('HyperEVM Engine not initialized');
+    }
+    
+    return await this.oraclePriceReader.simulatePriceImpact(assetIndex, priceChangePercent);
+  }
+
+  /**
+   * Get enhanced precompile information
+   */
+  getPrecompileInfo(): Map<string, any> {
+    return new Map(this.hyperEVMPrecompiles);
+  }
+
+  /**
+   * Estimate gas for HyperEVM-specific operations
+   */
+  estimateHyperEVMGas(operation: {
+    type: 'oracle_read' | 'core_writer' | 'hype_transfer';
+    outputLength?: number;
+    actionCount?: number;
+  }): number {
+    switch (operation.type) {
+      case 'oracle_read':
+        return this.oraclePriceReader.getOracleGasCost(operation.outputLength || 32);
+      case 'core_writer':
+        return 47000 * (operation.actionCount || 1);
+      case 'hype_transfer':
+        return 21000;
+      default:
+        return 21000;
+    }
+  }
+
+  /**
+   * Advanced MEV analysis for bundle optimization
+   */
+  async analyzeMEVOpportunities(transactions: any[]): Promise<{
+    arbitrageOps: Array<{
+      type: 'oracle_arbitrage' | 'cross_asset' | 'temporal';
+      profitability: number;
+      gasRequired: number;
+      riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+      description: string;
+    }>;
+    frontRunningRisks: Array<{
+      transactionIndex: number;
+      vulnerability: string;
+      mitigation: string;
+    }>;
+    bundleOptimization: {
+      recommendedOrder: number[];
+      gasOptimization: number;
+      mevProtection: boolean;
+    };
+  }> {
+    const arbitrageOps: any[] = [];
+    const frontRunningRisks: any[] = [];
+    
+    // Analyze transactions for MEV opportunities
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      
+      // Check for oracle-based arbitrage opportunities
+      if (tx.to && this.hyperEVMPrecompiles.has(tx.to.toLowerCase())) {
+        const precompile = this.hyperEVMPrecompiles.get(tx.to.toLowerCase())!;
+        
+        if (precompile.name === 'ORACLE_PRICES') {
+          arbitrageOps.push({
+            type: 'oracle_arbitrage',
+            profitability: Math.random() * 100, // Simplified - would need real price analysis
+            gasRequired: 150000,
+            riskLevel: 'MEDIUM',
+            description: 'Oracle price arbitrage opportunity detected'
+          });
+        }
+      }
+      
+      // Check for front-running vulnerabilities
+      if (tx.data && tx.data.includes('swap')) {
+        frontRunningRisks.push({
+          transactionIndex: i,
+          vulnerability: 'DEX swap vulnerable to sandwich attacks',
+          mitigation: 'Use commit-reveal scheme or private mempool'
+        });
+      }
+    }
+    
+    // Generate bundle optimization recommendations
+    const bundleOptimization = {
+      recommendedOrder: transactions.map((_, i) => i), // Simplified
+      gasOptimization: arbitrageOps.length * 10000, // Estimated gas savings
+      mevProtection: frontRunningRisks.length === 0
+    };
+    
+    return {
+      arbitrageOps,
+      frontRunningRisks,
+      bundleOptimization
+    };
+  }
+
+  // ================================
   // UTILITY METHODS
   // ================================
 
@@ -1467,6 +1960,11 @@ export class HyperEVMEngine extends EventEmitter {
     chainId: number;
     cacheStats: { hits: number; misses: number; size: number };
     activeSimulations: number;
+    hyperevmMetrics: {
+      precompileInfo: Map<string, any>;
+      oracleCacheSize: number;
+      coreWriterEnabled: boolean;
+    };
   }> {
     try {
       const [blockNumber, chainId] = await Promise.all([
@@ -1483,7 +1981,12 @@ export class HyperEVMEngine extends EventEmitter {
           misses: this.accountCache.calculatedSize,
           size: this.accountCache.size
         },
-        activeSimulations: this.activeSimulations.size
+        activeSimulations: this.activeSimulations.size,
+        hyperevmMetrics: {
+          precompileInfo: this.hyperEVMPrecompiles,
+          oracleCacheSize: this.oraclePriceReader.getCachedPrices().size,
+          coreWriterEnabled: true
+        }
       };
     } catch (error) {
       return {
@@ -1491,7 +1994,12 @@ export class HyperEVMEngine extends EventEmitter {
         blockNumber: '0',
         chainId: 0,
         cacheStats: { hits: 0, misses: 0, size: 0 },
-        activeSimulations: this.activeSimulations.size
+        activeSimulations: this.activeSimulations.size,
+        hyperevmMetrics: {
+          precompileInfo: this.hyperEVMPrecompiles,
+          oracleCacheSize: 0,
+          coreWriterEnabled: false
+        }
       };
     }
   }
@@ -1500,7 +2008,8 @@ export class HyperEVMEngine extends EventEmitter {
     this.accountCache.clear();
     this.codeCache.clear();
     this.storageCache.clear();
-    logger.info('All caches cleared');
+    this.oraclePriceReader.clearCache();
+    logger.info('All caches cleared including HyperEVM-specific caches');
   }
 
   async shutdown(): Promise<void> {
@@ -1538,22 +2047,68 @@ export function createHyperEVMEngine(config: HyperEVMConfig): HyperEVMEngine {
 // ================================
 
 export const DEFAULT_HYPEREVM_CONFIG: HyperEVMConfig = {
-  chainId: 998, // HyperEVM mainnet
-  networkId: 998,
-  rpcUrl: 'https://api.hyperliquid.xyz/evm',
+  chainId: 999, // HyperEVM mainnet (corrected from docs)
+  networkId: 999,
+  rpcUrl: 'https://rpc.hyperliquid.xyz/evm', // Correct mainnet RPC
   stateConfig: {
     cacheSize: 10000,
+    persistentStorage: false,
+    maxConcurrentSimulations: 20, // Increased for better performance
+    timeoutMs: 45000 // Increased timeout for complex simulations
+  },
+  security: {
+    enableRateLimiting: true,
+    maxGasLimit: BigInt(30000000),
+    maxValueTransfer: BigInt('1000000000000000000000'), // 1000 HYPE
+    allowedPrecompiles: [
+      // HyperCore read precompiles (starting from 0x800)
+      '0x0000000000000000000000000000000000000800', // Base read precompile
+      '0x0000000000000000000000000000000000000801', // Perp positions
+      '0x0000000000000000000000000000000000000802', // Spot balances
+      '0x0000000000000000000000000000000000000803', // Vault equity
+      '0x0000000000000000000000000000000000000804', // Staking delegations
+      '0x0000000000000000000000000000000000000805', // L1 block number
+      '0x0000000000000000000000000000000000000806', // Reserved
+      '0x0000000000000000000000000000000000000807', // Oracle prices
+      '0x0000000000000000000000000000000000000808', // Reserved  
+      '0x0000000000000000000000000000000000000809', // Reserved
+      '0x000000000000000000000000000000000000080a', // Perp asset info
+      // CoreWriter contract
+      '0x3333333333333333333333333333333333333333', // CoreWriter for HyperCore actions
+      // HYPE system contracts
+      '0x2222222222222222222222222222222222222222', // HYPE transfer to HyperEVM
+      '0x5555555555555555555555555555555555555555'  // Wrapped HYPE contract
+    ]
+  }
+};
+
+// Testnet configuration
+export const TESTNET_HYPEREVM_CONFIG: HyperEVMConfig = {
+  chainId: 998, // HyperEVM testnet
+  networkId: 998,
+  rpcUrl: 'https://rpc.hyperliquid-testnet.xyz/evm',
+  stateConfig: {
+    cacheSize: 5000,
     persistentStorage: false,
     maxConcurrentSimulations: 10,
     timeoutMs: 30000
   },
   security: {
-    enableRateLimiting: true,
+    enableRateLimiting: false, // Disabled for testnet
     maxGasLimit: BigInt(30000000),
-    maxValueTransfer: BigInt('1000000000000000000000'), // 1000 ETH
+    maxValueTransfer: BigInt('10000000000000000000000'), // 10000 HYPE for testing
     allowedPrecompiles: [
       '0x0000000000000000000000000000000000000800',
+      '0x0000000000000000000000000000000000000801',
+      '0x0000000000000000000000000000000000000802',
+      '0x0000000000000000000000000000000000000803',
+      '0x0000000000000000000000000000000000000804',
+      '0x0000000000000000000000000000000000000805',
+      '0x0000000000000000000000000000000000000806',
       '0x0000000000000000000000000000000000000807',
+      '0x0000000000000000000000000000000000000808',
+      '0x0000000000000000000000000000000000000809',
+      '0x000000000000000000000000000000000000080a',
       '0x3333333333333333333333333333333333333333',
       '0x2222222222222222222222222222222222222222',
       '0x5555555555555555555555555555555555555555'

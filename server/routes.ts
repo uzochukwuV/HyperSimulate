@@ -389,6 +389,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ================================
+  // HYPEREVM-SPECIFIC ENDPOINTS
+  // ================================
+
+  // CoreWriter simulation endpoints
+  app.post("/api/v1/hyperevm/corewriter/simulate", async (req, res) => {
+    try {
+      const { actions } = req.body;
+      if (!Array.isArray(actions) || actions.length === 0) {
+        return res.status(400).json({ error: "Actions array is required" });
+      }
+
+      const result = await simulationService.simulateCoreWriterActions(actions);
+      
+      broadcast({
+        type: 'corewriter_simulation_complete',
+        data: result
+      });
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "CoreWriter simulation failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Oracle price analysis endpoints
+  app.post("/api/v1/hyperevm/oracle/analyze", async (req, res) => {
+    try {
+      const { assetIndexes } = req.body;
+      if (!Array.isArray(assetIndexes) || assetIndexes.length === 0) {
+        return res.status(400).json({ error: "Asset indexes array is required" });
+      }
+
+      const result = await simulationService.analyzeOraclePrices(assetIndexes);
+      
+      // Convert Map to object for JSON serialization
+      const pricesObject = Object.fromEntries(result.prices);
+      
+      res.json({
+        success: true,
+        data: {
+          ...result,
+          prices: pricesObject
+        }
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Oracle price analysis failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // MEV analysis endpoint
+  app.post("/api/v1/hyperevm/mev/analyze", async (req, res) => {
+    try {
+      const { transactions } = req.body;
+      if (!Array.isArray(transactions) || transactions.length === 0) {
+        return res.status(400).json({ error: "Transactions array is required" });
+      }
+
+      const result = await simulationService.analyzeMEVOpportunities(transactions);
+      
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "MEV analysis failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Gas optimization endpoint
+  app.post("/api/v1/hyperevm/gas/optimize", async (req, res) => {
+    try {
+      const { transaction } = req.body;
+      if (!transaction) {
+        return res.status(400).json({ error: "Transaction object is required" });
+      }
+
+      const result = await simulationService.optimizeTransactionGas(transaction);
+      
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Gas optimization failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Enhanced network state with HyperEVM metrics
+  app.get("/api/v1/hyperevm/network/state", async (req, res) => {
+    try {
+      const state = await simulationService.getCurrentNetworkState();
+      res.json({
+        success: true,
+        data: state
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch HyperEVM network state",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // ================================
+  // ADMIN DASHBOARD ENDPOINTS
+  // ================================
+
+  // Admin metrics endpoint
+  app.get("/api/admin/metrics", async (req, res) => {
+    try {
+      const metrics = await simulationService.getSystemMetrics();
+      console.log('📊 Admin metrics requested:', metrics);
+      res.json(metrics);
+    } catch (error) {
+      console.error('❌ Failed to get admin metrics:', error);
+      res.status(500).json({ 
+        error: "Failed to fetch system metrics",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Recent simulations endpoint
+  app.get("/api/simulations/recent", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+      const recentSimulations = await simulationService.getRecentSimulations(limit);
+      console.log('📝 Recent simulations requested:', recentSimulations.length, 'results');
+      res.json(recentSimulations);
+    } catch (error) {
+      console.error('❌ Failed to get recent simulations:', error);
+      res.status(500).json({ 
+        error: "Failed to fetch recent simulations",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
   // JSON-RPC endpoint for EVM compatibility
   app.post("/rpc", async (req, res) => {
     const { method, params, id } = req.body;

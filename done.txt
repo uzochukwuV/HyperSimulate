@@ -1,0 +1,697 @@
+// utils/farcaster.ts
+import { NeynarAPIClient, Configuration } from "@neynar/nodejs-sdk";
+import { createPublicClient, createWalletClient, http, parseEther, encodeFunctionData } from 'viem';
+import { base, baseSepolia } from 'viem/chains';
+import { privateKeyToAccount } from 'viem/accounts';
+
+// ============ INTERFACES ============
+export interface FarcasterUser {
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
+  custodyAddress: string;
+  verifications: string[];
+  followerCount: number;
+  followingCount: number;
+  bioText?: string;
+  location?: { 
+    latitude?: number; 
+    longitude?: number; 
+    address?: { 
+      city?: string; 
+      state?: string; 
+      country?: string; 
+    }; 
+  };
+  connectedAddresses?: Array<{ 
+    address: string; 
+    blockchain: string; 
+    chainId: string; 
+  }>;
+  viewerContext?: {
+    following: boolean;
+    followedBy: boolean;
+  };
+}
+
+export interface FarcasterCast {
+  hash: string;
+  threadHash: string;
+  parentHash?: string;
+  parentUrl?: string;
+  rootParentUrl?: string;
+  parentAuthor?: {
+    fid: number;
+    username: string;
+  };
+  author: FarcasterUser;
+  text: string;
+  timestamp: string;
+  embeds: Array<{
+    url?: string;
+    castId?: {
+      fid: number;
+      hash: string;
+    };
+  }>;
+  reactions: {
+    likes: Array<{
+      fid: number;
+      fname: string;
+    }>;
+    recasts: Array<{
+      fid: number;
+      fname: string;
+    }>;
+    likesCount: number;
+    recastsCount: number;
+  };
+  replies: {
+    count: number;
+  };
+  channel?: {
+    id: string;
+    name: string;
+    url: string;
+    description: string;
+    imageUrl: string;
+    followerCount: number;
+  };
+  viewerContext?: {
+    liked: boolean;
+    recasted: boolean;
+  };
+}
+
+export interface FarcasterChannel {
+  id: string;
+  name: string;
+  url: string;
+  description: string;
+  imageUrl: string;
+  followerCount: number;
+  hostFids: number[];
+  createdAt: number;
+  leadFid: number;
+}
+
+export interface WebhookData {
+  type: string;
+  data: {
+    object: string;
+    hash: string;
+    threadHash: string;
+    parentHash: string | null;
+    parentUrl: string | null;
+    rootParentUrl: string | null;
+    parentAuthor: FarcasterUser | null;
+    author: FarcasterUser;
+    text: string;
+    timestamp: string;
+    embeds: any[];
+    reactions: {
+      likesCount: number;
+      recastsCount: number;
+    };
+    replies: {
+      count: number;
+    };
+    channel: FarcasterChannel | null;
+    mentioned_profiles: FarcasterUser[];
+  };
+}
+
+// ============ FARCASTER SERVICE ============
+export class FarcasterService {
+  private client: NeynarAPIClient;
+  private signerUuid: string;
+  
+  constructor(apiKey: string, signerUuid: string) {
+    this.client = new NeynarAPIClient({ apiKey });
+    this.signerUuid = signerUuid;
+  }
+
+  // ============ USER MANAGEMENT ============
+  
+  /**
+   * Get user by FID with full profile data
+   */
+  async getUserByFid(fid: number): Promise<FarcasterUser | null> {
+    try {
+      const response = await this.client.fetchBulkUsers([fid]);
+      
+      if (response.users && response.users.length > 0) {
+        const user = response.users[0];
+        return {
+          fid: user.fid,
+          username: user.username || '',
+          displayName: user.displayName || '',
+          pfpUrl: user.pfp?.url || '',
+          custodyAddress: user.custodyAddress || '',
+          verifications: user.verifications || [],
+          followerCount: user.followerCount || 0,
+          followingCount: user.followingCount || 0,
+          bioText: user.profile?.bio?.text,
+          location: user.profile?.location,
+          connectedAddresses: user.verifications?.map(v => ({
+            address: v,
+            blockchain: 'ethereum',
+            chainId: '1'
+          })),
+          viewerContext: user.viewerContext
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching user by FID:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get user by username
+   */
+  async getUserByUsername(username: string): Promise<FarcasterUser | null> {
+    try {
+      const response = await this.client.lookupUserByUsername(username);
+      
+      if (response.result?.user) {
+        const user = response.result.user;
+        return {
+          fid: user.fid,
+          username: user.username || '',
+          displayName: user.displayName || '',
+          pfpUrl: user.pfp?.url || '',
+          custodyAddress: user.custodyAddress || '',
+          verifications: user.verifications || [],
+          followerCount: user.followerCount || 0,
+          followingCount: user.followingCount || 0,
+          bioText: user.profile?.bio?.text,
+          viewerContext: user.viewerContext
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching user by username:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get user's engagement metrics over time period
+   */
+  async getUserEngagementMetrics(fid: number, days: number = 7): Promise<{
+    totalLikes: number;
+    totalRecasts: number;
+    totalReplies: number;
+    avgEngagementRate: number;
+    trendingCasts: FarcasterCast[];
+  }> {
+    try {
+      const response = await this.client.fetchCastsForUser(fid, { limit: 100 });
+      
+      let totalLikes = 0;
+      let totalRecasts = 0;
+      let totalReplies = 0;
+      const recentCasts: FarcasterCast[] = [];
+      
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      if (response.casts) {
+        for (const cast of response.casts) {
+          const castDate = new Date(cast.timestamp);
+          
+          if (castDate >= cutoffDate) {
+            totalLikes += cast.reactions?.likes?.length || 0;
+            totalRecasts += cast.reactions?.recasts?.length || 0;
+            totalReplies += cast.replies?.count || 0;
+            
+            recentCasts.push(this.formatCast(cast));
+          }
+        }
+      }
+      
+      // Sort by engagement for trending casts
+      const trendingCasts = recentCasts
+        .sort((a, b) => (b.reactions.likesCount + b.reactions.recastsCount) - 
+                       (a.reactions.likesCount + a.reactions.recastsCount))
+        .slice(0, 5);
+      
+      const avgEngagementRate = recentCasts.length > 0 ? 
+        (totalLikes + totalRecasts + totalReplies) / recentCasts.length : 0;
+      
+      return {
+        totalLikes,
+        totalRecasts,
+        totalReplies,
+        avgEngagementRate,
+        trendingCasts
+      };
+    } catch (error) {
+      console.error('Error fetching engagement metrics:', error);
+      return {
+        totalLikes: 0,
+        totalRecasts: 0,
+        totalReplies: 0,
+        avgEngagementRate: 0,
+        trendingCasts: []
+      };
+    }
+  }
+
+  // ============ CAST MANAGEMENT ============
+  
+  /**
+   * Get cast by hash with full engagement data
+   */
+  async getCastByHash(hash: string): Promise<FarcasterCast | null> {
+    try {
+      const response = await this.client.lookupCastByHash(hash);
+      
+      if (response.cast) {
+        return this.formatCast(response.cast);
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching cast by hash:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Track cast engagement over time
+   */
+  async trackCastEngagement(hash: string, intervalMinutes: number = 60): Promise<{
+    hash: string;
+    snapshots: Array<{
+      timestamp: Date;
+      likes: number;
+      recasts: number;
+      replies: number;
+      engagementScore: number;
+    }>;
+  }> {
+    const snapshots = [];
+    const cast = await this.getCastByHash(hash);
+    
+    if (cast) {
+      const currentSnapshot = {
+        timestamp: new Date(),
+        likes: cast.reactions.likesCount,
+        recasts: cast.reactions.recastsCount,
+        replies: cast.replies.count,
+        engagementScore: cast.reactions.likesCount + (cast.reactions.recastsCount * 2) + cast.replies.count
+      };
+      
+      snapshots.push(currentSnapshot);
+    }
+    
+    return {
+      hash,
+      snapshots
+    };
+  }
+
+  /**
+   * Post a cast with betting market announcement
+   */
+  async publishMarketCast(
+    marketId: string,
+    marketTitle: string,
+    marketType: string,
+    endTime: Date,
+    embedUrl?: string
+  ): Promise<string | null> {
+    try {
+      const timeLeft = Math.floor((endTime.getTime() - Date.now()) / (1000 * 60 * 60));
+      
+      const emoji = marketType === 'poll' ? '📊' :
+                   marketType === 'viral' ? '🚀' :
+                   marketType === 'channel' ? '⚡' : '🎯';
+      
+      const text = `${emoji} New prediction market live!\n\n"${marketTitle}"\n\n⏰ ${timeLeft}h remaining\n🎰 Place your bets at Blink!`;
+      
+      const response = await this.client.publishCast(this.signerUuid, {
+        text,
+        embeds: embedUrl ? [{ url: embedUrl }] : []
+      });
+      
+      return response.hash || null;
+    } catch (error) {
+      console.error('Error publishing market cast:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Post win/loss celebration cast
+   */
+  async publishResultCast(
+    marketId: string,
+    marketTitle: string,
+    winnerFid: number,
+    winAmount: string,
+    prediction: string
+  ): Promise<string | null> {
+    try {
+      const winner = await this.getUserByFid(winnerFid);
+      const winnerMention = winner ? `@${winner.username}` : `User ${winnerFid}`;
+      
+      const text = `🎉 Market Settled! 🎉\n\n"${marketTitle}"\n\n🏆 Winner: ${winnerMention}\n💰 Won: ${winAmount} ETH\n🎯 Predicted: ${prediction.toUpperCase()}\n\nGG! Play more at Blink ⚡`;
+      
+      const response = await this.client.publishCast(this.signerUuid, {
+        text,
+        embeds: [`https://blink.game/market/${marketId}`]
+      });
+      
+      return response.hash || null;
+    } catch (error) {
+      console.error('Error publishing result cast:', error);
+      return null;
+    }
+  }
+
+  // ============ CHANNEL MANAGEMENT ============
+  
+  /**
+   * Get channel details and statistics
+   */
+  async getChannelDetails(channelId: string): Promise<FarcasterChannel | null> {
+    try {
+      const response = await this.client.fetchChannelDetails(channelId);
+      
+      if (response.channel) {
+        return {
+          id: response.channel.id,
+          name: response.channel.name,
+          url: response.channel.url,
+          description: response.channel.description,
+          imageUrl: response.channel.imageUrl,
+          followerCount: response.channel.followerCount,
+          hostFids: response.channel.hostFids || [],
+          createdAt: response.channel.createdAt,
+          leadFid: response.channel.leadFid
+        };
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching channel details:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get trending channels for channel wars betting
+   */
+  async getTrendingChannels(limit: number = 10): Promise<FarcasterChannel[]> {
+    try {
+      const response = await this.client.fetchTrendingChannels({ limit });
+      
+      if (response.channels) {
+        return response.channels.map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          url: channel.url,
+          description: channel.description,
+          imageUrl: channel.imageUrl,
+          followerCount: channel.followerCount,
+          hostFids: channel.hostFids || [],
+          createdAt: channel.createdAt,
+          leadFid: channel.leadFid
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching trending channels:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get channel growth metrics for betting
+   */
+  async getChannelGrowthMetrics(channelId: string, days: number = 7): Promise<{
+    currentFollowers: number;
+    dailyPosts: number;
+    weeklyGrowth: number;
+    engagementRate: number;
+    topCasts: FarcasterCast[];
+  }> {
+    try {
+      const [channelDetails, channelFeed] = await Promise.all([
+        this.getChannelDetails(channelId),
+        this.client.fetchCastsByChannel(channelId, { limit: 100 })
+      ]);
+      
+      if (!channelDetails) {
+        throw new Error('Channel not found');
+      }
+      
+      let totalEngagement = 0;
+      let postsInPeriod = 0;
+      const topCasts: FarcasterCast[] = [];
+      
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - days);
+      
+      if (channelFeed.casts) {
+        for (const cast of channelFeed.casts) {
+          const castDate = new Date(cast.timestamp);
+          
+          if (castDate >= cutoffDate) {
+            postsInPeriod++;
+            totalEngagement += (cast.reactions?.likes?.length || 0) + 
+                             (cast.reactions?.recasts?.length || 0) + 
+                             (cast.replies?.count || 0);
+            
+            topCasts.push(this.formatCast(cast));
+          }
+        }
+      }
+      
+      // Sort top casts by engagement
+      topCasts.sort((a, b) => 
+        (b.reactions.likesCount + b.reactions.recastsCount) - 
+        (a.reactions.likesCount + a.reactions.recastsCount)
+      );
+      
+      return {
+        currentFollowers: channelDetails.followerCount,
+        dailyPosts: Math.round(postsInPeriod / days),
+        weeklyGrowth: 0, // Would need historical data
+        engagementRate: postsInPeriod > 0 ? totalEngagement / postsInPeriod : 0,
+        topCasts: topCasts.slice(0, 5)
+      };
+    } catch (error) {
+      console.error('Error fetching channel growth metrics:', error);
+      return {
+        currentFollowers: 0,
+        dailyPosts: 0,
+        weeklyGrowth: 0,
+        engagementRate: 0,
+        topCasts: []
+      };
+    }
+  }
+
+  // ============ WEBHOOK HANDLERS ============
+  
+  /**
+   * Process incoming webhook for cast events
+   */
+  async processWebhook(webhookData: WebhookData): Promise<{
+    shouldCreateMarket: boolean;
+    marketData?: {
+      type: string;
+      title: string;
+      description: string;
+      sourceId: string;
+      threshold?: number;
+    };
+  }> {
+    const { type, data } = webhookData;
+    
+    switch (type) {
+      case 'cast.created':
+        // Check if cast meets criteria for viral betting market
+        if (this.shouldCreateViralMarket(data)) {
+          return {
+            shouldCreateMarket: true,
+            marketData: {
+              type: 'viral',
+              title: `Will this cast go viral?`,
+              description: `Bet on whether "${data.text.substring(0, 100)}..." gets 100+ likes in 24h`,
+              sourceId: data.hash,
+              threshold: 100
+            }
+          };
+        }
+        break;
+        
+      case 'reaction.added':
+        // Track engagement for existing markets
+        await this.updateCastEngagement(data.hash);
+        break;
+    }
+    
+    return { shouldCreateMarket: false };
+  }
+
+  /**
+   * Determine if cast should trigger viral betting market
+   */
+  private shouldCreateViralMarket(castData: any): boolean {
+    // Criteria for auto-creating viral markets
+    const author = castData.author;
+    
+    // High-follower accounts (>10k followers)
+    if (author.followerCount > 10000) return true;
+    
+    // Trending topics or controversial content
+    const controversialKeywords = ['drama', 'controversial', 'breaking', 'exclusive'];
+    const hasControversialContent = controversialKeywords.some(keyword => 
+      castData.text.toLowerCase().includes(keyword)
+    );
+    
+    if (hasControversialContent) return true;
+    
+    // Casts with media embeds from verified accounts
+    if (castData.embeds?.length > 0 && author.verifications?.length > 0) return true;
+    
+    return false;
+  }
+
+  /**
+   * Update cast engagement metrics in database
+   */
+  private async updateCastEngagement(castHash: string): Promise<void> {
+    try {
+      const cast = await this.getCastByHash(castHash);
+      if (cast) {
+        // Update your database with current engagement metrics
+        // This would connect to your database service
+        console.log(`Updated engagement for cast ${castHash}:`, {
+          likes: cast.reactions.likesCount,
+          recasts: cast.reactions.recastsCount,
+          replies: cast.replies.count
+        });
+      }
+    } catch (error) {
+      console.error('Error updating cast engagement:', error);
+    }
+  }
+
+  // ============ UTILITY METHODS ============
+  
+  /**
+   * Format cast data to standardized interface
+   */
+  private formatCast(cast: any): FarcasterCast {
+    return {
+      hash: cast.hash,
+      threadHash: cast.threadHash,
+      parentHash: cast.parentHash,
+      parentUrl: cast.parentUrl,
+      rootParentUrl: cast.rootParentUrl,
+      parentAuthor: cast.parentAuthor,
+      author: {
+        fid: cast.author.fid,
+        username: cast.author.username || '',
+        displayName: cast.author.displayName || '',
+        pfpUrl: cast.author.pfp?.url || '',
+        custodyAddress: cast.author.custodyAddress || '',
+        verifications: cast.author.verifications || [],
+        followerCount: cast.author.followerCount || 0,
+        followingCount: cast.author.followingCount || 0
+      },
+      text: cast.text || '',
+      timestamp: cast.timestamp,
+      embeds: cast.embeds || [],
+      reactions: {
+        likes: cast.reactions?.likes || [],
+        recasts: cast.reactions?.recasts || [],
+        likesCount: cast.reactions?.likes?.length || 0,
+        recastsCount: cast.reactions?.recasts?.length || 0
+      },
+      replies: {
+        count: cast.replies?.count || 0
+      },
+      channel: cast.channel,
+      viewerContext: cast.viewerContext
+    };
+  }
+
+  /**
+   * Generate market embed URL
+   */
+  generateMarketEmbedUrl(marketId: string, baseUrl: string): string {
+    return `${baseUrl}/market/${marketId}`;
+  }
+
+  /**
+   * Calculate engagement score for predictions
+   */
+  calculateEngagementScore(cast: FarcasterCast): number {
+    return cast.reactions.likesCount + 
+           (cast.reactions.recastsCount * 2) + 
+           cast.replies.count;
+  }
+}
+
+// ============ MARKET AUTOMATION SERVICE ============
+export class MarketAutomationService {
+  private farcasterService: FarcasterService;
+  
+  constructor(farcasterService: FarcasterService) {
+    this.farcasterService = farcasterService;
+  }
+
+  /**
+   * Monitor trending casts and auto-create viral markets
+   */
+  async monitorTrendingContent(): Promise<void> {
+    try {
+      // Get trending casts from various channels
+      const trendingChannels = await this.farcasterService.getTrendingChannels(5);
+      
+      for (const channel of trendingChannels) {
+        const channelMetrics = await this.farcasterService.getChannelGrowthMetrics(channel.id);
+        
+        // Auto-create viral markets for top casts
+        for (const cast of channelMetrics.topCasts.slice(0, 2)) {
+          const engagementScore = this.farcasterService.calculateEngagementScore(cast);
+          
+          if (engagementScore > 50 && this.isRecentCast(cast, 2)) { // Within 2 hours
+            await this.createViralMarket(cast);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error monitoring trending content:', error);
+    }
+  }
+
+  /**
+   * Auto-settle markets based on criteria
+   */
+  async autoSettleMarkets(): Promise<void> {
+    // Implementation would check pending markets and settle them
+    // based on their criteria (time-based, engagement thresholds, etc.)
+  }
+
+  private isRecentCast(cast: FarcasterCast, hours: number): boolean {
+    const castTime = new Date(cast.timestamp).getTime();
+    const cutoffTime = Date.now() - (hours * 60 * 60 * 1000);
+    return castTime > cutoffTime;
+  }
+
+  private async createViralMarket(cast: FarcasterCast): Promise<void> {
+    // Create viral betting market
+    console.log(`Creating viral market for cast ${cast.hash} by @${cast.author.username}`);
+    // Implementation would call your market creation service
+  }
+}
+
+export default FarcasterService;
