@@ -1,16 +1,50 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle, Fuel, Coins, Activity, Code, Zap, Clock } from "lucide-react";
 
+interface HyperEVMAnalysis {
+  gasAnalysis?: {
+    precompileBreakdown?: {
+      reads: number;
+      writes: number;
+    };
+    coreWriterGas?: number;
+    oracleReadGas?: number;
+    estimatedCost?: string;
+  };
+  securityInsights?: Array<{
+    type: string;
+    severity: 'HIGH' | 'MEDIUM' | 'LOW';
+    description: string;
+    recommendation?: string;
+  }>;
+  optimizationSuggestions?: Array<{
+    type: string;
+    potentialSavings: string;
+    description: string;
+    implementation?: string;
+  }>;
+  riskAssessment?: {
+    overallRisk: 'HIGH' | 'MEDIUM' | 'LOW';
+    confidenceScore: number;
+    riskFactors: string[];
+    mitigationSuggestions: string[];
+  };
+}
+
 interface SimulationResultsProps {
   result: {
-    simulationId: string;
-    result: {
+    simulationId?: string;
+    requestId?: string;
+    originalTransaction?: any;
+    originalReceipt?: any;
+    replayTransaction?: any;
+    replayResult?: {
       success: boolean;
-      gasUsed: number;
+      gas: number;
       gasLimit: number;
       transactionFee: string;
       executionTrace: Array<{
@@ -19,7 +53,53 @@ interface SimulationResultsProps {
         from?: string;
         to?: string;
         value?: string;
-        gasUsed: number;
+        gas: number;
+        gasRemaining: number;
+        output?: string;
+        error?: string;
+      }>;
+      stateChanges: Array<{
+        address: string;
+        slot?: string;
+        previousValue?: string;
+        newValue?: string;
+      }>;
+      events: Array<{
+        address: string;
+        topics: string[];
+        data: string;
+        decoded?: {
+          name: string;
+          inputs: Array<{
+            name: string;
+            type: string;
+            value: any;
+          }>;
+        };
+      }>;
+      gasBreakdown: {
+        intrinsicGas: number;
+        executionGas: number;
+        storageGas: number;
+        memoryGas: number;
+      };
+      errorMessage?: string;
+      returnValue?: string;
+      analysis?: HyperEVMAnalysis;
+    };
+    // Legacy format support
+    result?: {
+      success: boolean;
+      gas: number;
+      gasLimit: number;
+      transactionFee: string;
+      executionTrace: Array<{
+        type: "CALL" | "RETURN" | "REVERT" | "CREATE";
+        depth: number;
+        from?: string;
+        to?: string;
+        value?: string;
+        gas: number;
         gasRemaining: number;
         output?: string;
         error?: string;
@@ -51,13 +131,28 @@ interface SimulationResultsProps {
       };
       errorMessage?: string;
       returnValue?: string;
+      analysis?: HyperEVMAnalysis;
     };
   };
 }
 
-export default function SimulationResults({ result }: SimulationResultsProps) {
+export default function SimulationResults({ result }: SimulationResultsProps ) {
   const [activeTab, setActiveTab] = useState("trace");
-  const { result: simResult } = result;
+
+
+  
+  // Support both new replay format and legacy simulation format
+  const simResult = result.replayResult || result.result;
+  const isReplay = !!result.replayResult;
+
+  if (!simResult) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">No Results Available</h2>
+        <p className="text-hyper-grey">No simulation or replay results to display.</p>
+      </div>
+    );
+  }
 
   const formatAddress = (address: string) => {
     if (!address) return "";
@@ -73,12 +168,23 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
   };
 
   const getGasUsagePercentage = () => {
-    return Math.round((simResult.gasUsed / simResult.gasLimit) * 100);
+    return Math.round((simResult.gas / simResult.gasLimit) * 100);
   };
+
+  useEffect(() => {
+    
+    console.log(simResult)
+    return () => {
+      
+    }
+  }, [])
+  
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold" data-testid="title-simulation-results">Simulation Results</h2>
+      <h2 className="text-2xl font-bold" data-testid="title-simulation-results">
+        {isReplay ? 'Transaction Replay Results' : 'Simulation Results'}
+      </h2>
       
       {/* Status Cards */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -104,7 +210,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
               <Fuel className="text-hyper-teal" size={20} />
             </div>
             <div className="text-3xl font-bold text-hyper-teal mb-2 font-mono" data-testid="text-gas-used">
-              {formatGas(simResult.gasUsed)}
+              {formatGas(simResult.gas)}
             </div>
             <p className="text-sm text-hyper-grey">
               of {formatGas(simResult.gasLimit)} limit ({getGasUsagePercentage()}%)
@@ -173,7 +279,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
         <CardContent>
           <TabsContent value="trace" className="space-y-4 mt-0">
             <div className="space-y-4">
-              {simResult.executionTrace.map((step, index) => (
+              {(simResult.executionTrace || []).map((step, index) => (
                 <div key={index} className="simulation-trace-item" data-testid={`trace-item-${index}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-3">
@@ -186,7 +292,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                       <span className="font-mono text-sm text-hyper-grey">Depth: {step.depth}</span>
                     </div>
                     <span className="text-xs text-hyper-grey font-mono" data-testid={`gas-${index}`}>
-                      Gas: {formatGas(step.gasUsed)}
+                      Gas: {formatGas(step.gas)}
                     </span>
                   </div>
                   <div className="font-mono text-sm space-y-1">
@@ -222,27 +328,33 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
           </TabsContent>
 
           <TabsContent value="state" className="mt-0">
-            {simResult.stateChanges.length > 0 ? (
+            {(simResult.stateChanges || []).length > 0 ? (
               <div className="space-y-4">
-                {simResult.stateChanges.map((change, index) => (
+                {(simResult.stateChanges || []).map((change, index) => (
                   <div key={index} className="code-block" data-testid={`state-change-${index}`}>
                     <div className="font-mono text-sm space-y-2">
                       <div>
                         <span className="text-hyper-grey">Address:</span>{" "}
                         <span className="text-hyper-teal">{change.address}</span>
                       </div>
-                      <div>
-                        <span className="text-hyper-grey">Slot:</span>{" "}
-                        <span className="text-white">{change.slot}</span>
-                      </div>
-                      <div>
-                        <span className="text-hyper-grey">Previous:</span>{" "}
-                        <span className="text-hyper-red">{change.previousValue}</span>
-                      </div>
-                      <div>
-                        <span className="text-hyper-grey">New:</span>{" "}
-                        <span className="text-hyper-green">{change.newValue}</span>
-                      </div>
+                      {change.slot && (
+                        <div>
+                          <span className="text-hyper-grey">Slot:</span>{" "}
+                          <span className="text-white">{change.slot}</span>
+                        </div>
+                      )}
+                      {change.previousValue && (
+                        <div>
+                          <span className="text-hyper-grey">Previous:</span>{" "}
+                          <span className="text-hyper-red">{change.previousValue}</span>
+                        </div>
+                      )}
+                      {change.newValue && (
+                        <div>
+                          <span className="text-hyper-grey">New:</span>{" "}
+                          <span className="text-hyper-green">{change.newValue}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -255,9 +367,9 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
           </TabsContent>
 
           <TabsContent value="events" className="mt-0">
-            {simResult.events.length > 0 ? (
+            {(simResult.events || []).length > 0 ? (
               <div className="space-y-4">
-                {simResult.events.map((event, index) => (
+                {(simResult.events || []).map((event, index) => (
                   <div key={index} className="code-block" data-testid={`event-${index}`}>
                     <div className="font-mono text-sm space-y-2">
                       <div>
@@ -298,7 +410,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                     <span className="text-sm font-medium">Intrinsic Gas</span>
                   </div>
                   <div className="text-xl font-mono font-bold" data-testid="gas-intrinsic">
-                    {formatGas(simResult.gasBreakdown.intrinsicGas)}
+                    {formatGas(simResult.gasBreakdown?.intrinsicGas || 0)}
                   </div>
                 </CardContent>
               </Card>
@@ -310,7 +422,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                     <span className="text-sm font-medium">Execution Gas</span>
                   </div>
                   <div className="text-xl font-mono font-bold" data-testid="gas-execution">
-                    {formatGas(simResult.gasBreakdown.executionGas)}
+                    {formatGas(simResult.gasBreakdown?.executionGas || 0)}
                   </div>
                 </CardContent>
               </Card>
@@ -322,7 +434,7 @@ export default function SimulationResults({ result }: SimulationResultsProps) {
                     <span className="text-sm font-medium">Storage Gas</span>
                   </div>
                   <div className="text-xl font-mono font-bold" data-testid="gas-storage">
-                    {formatGas(simResult.gasBreakdown.storageGas)}
+                    {formatGas(simResult.gasBreakdown?.storageGas || 0)}
                   </div>
                 </CardContent>
               </Card>

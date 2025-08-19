@@ -158,6 +158,140 @@ export class HyperliquidService {
       data: actionData,
     });
   }
+
+  // Additional RPC methods for transaction replay functionality
+  async getTransactionByHash(txHash: string): Promise<any> {
+    try {
+      console.log(`[HyperliquidService] Fetching transaction: ${txHash}`);
+      console.log(`[HyperliquidService] RPC URL: ${this.config.mainnetRpcUrl}`);
+      
+      const response = await this.rpcClient.post('', {
+        jsonrpc: '2.0',
+        method: 'eth_getTransactionByHash',
+        params: [txHash],
+        id: 1,
+      });
+      
+      console.log(`[HyperliquidService] RPC Response Status: ${response.status}`);
+      console.log(`[HyperliquidService] Response Data:`, JSON.stringify(response.data, null, 2));
+      
+      if (response.data.error) {
+        console.error(`[HyperliquidService] RPC Error:`, response.data.error);
+        throw new Error(`RPC Error: ${response.data.error.message || response.data.error}`);
+      }
+      
+      if (response.data.result === null) {
+        console.log(`[HyperliquidService] Transaction not found: ${txHash}`);
+        return null;
+      }
+      
+      return response.data.result;
+    } catch (error) {
+      console.error(`[HyperliquidService] Failed to get transaction ${txHash}:`, error);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', error.response.data);
+      }
+      throw error;
+    }
+  }
+
+  async getTransactionReceipt(txHash: string): Promise<any> {
+    try {
+      console.log(`[HyperliquidService] Fetching transaction receipt: ${txHash}`);
+      
+      const response = await this.rpcClient.post('', {
+        jsonrpc: '2.0',
+        method: 'eth_getTransactionReceipt',
+        params: [txHash],
+        id: 1,
+      });
+      
+      console.log(`[HyperliquidService] Receipt Response Status: ${response.status}`);
+      console.log(`[HyperliquidService] Receipt Response Data:`, JSON.stringify(response.data, null, 2));
+      
+      if (response.data.error) {
+        console.error(`[HyperliquidService] RPC Error for receipt:`, response.data.error);
+        throw new Error(`RPC Error: ${response.data.error.message || response.data.error}`);
+      }
+      
+      if (response.data.result === null) {
+        console.log(`[HyperliquidService] Transaction receipt not found: ${txHash}`);
+        return null;
+      }
+      
+      return response.data.result;
+    } catch (error) {
+      console.error(`[HyperliquidService] Failed to get receipt ${txHash}:`, error);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', error.response.data);
+      }
+      throw error;
+    }
+  }
+
+  async getBlockByNumber(blockNumber: string, includeTransactions = false): Promise<any> {
+    const response = await this.rpcClient.post('', {
+      jsonrpc: '2.0',
+      method: 'eth_getBlockByNumber',
+      params: [blockNumber, includeTransactions],
+      id: 1,
+    });
+    return response.data.result;
+  }
+
+  async getBlockByHash(blockHash: string, includeTransactions = false): Promise<any> {
+    const response = await this.rpcClient.post('', {
+      jsonrpc: '2.0',
+      method: 'eth_getBlockByHash',
+      params: [blockHash, includeTransactions],
+      id: 1,
+    });
+    return response.data.result;
+  }
+
+  // Generic RPC call method for custom requests
+  async rpcCall(request: { method: string; params: any[]; id?: number }): Promise<any> {
+    const response = await this.rpcClient.post('', {
+      jsonrpc: '2.0',
+      method: request.method,
+      params: request.params,
+      id: request.id || 1,
+    });
+    return response.data;
+  }
+
+  // Get multiple transactions in batch for efficiency
+  async getTransactionsBatch(txHashes: string[]): Promise<any[]> {
+    console.log(txHashes)
+    const requests = txHashes.map((hash, index) => ({
+      jsonrpc: '2.0',
+      method: 'eth_getTransactionByHash',
+      params: [hash],
+      id: index + 1,
+    }));
+    
+    const response = await this.rpcClient.post('', requests);
+    
+    return Array.isArray(response.data) ? response.data : [response.data];
+  }
+
+  // Get trace for transaction (if supported by RPC)
+  async traceTransaction(txHash: string): Promise<any> {
+    try {
+      const response = await this.rpcClient.post('', {
+        jsonrpc: '2.0',
+        method: 'debug_traceTransaction',
+        params: [txHash, { tracer: 'callTracer' }],
+        id: 1,
+      });
+      return response.data.result;
+    } catch (error) {
+      // Fallback if tracing not supported
+      return null;
+    }
+  }
 }
 
 // Factory function to create HyperliquidService with environment config

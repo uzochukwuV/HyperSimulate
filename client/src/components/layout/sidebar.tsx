@@ -7,7 +7,8 @@ import {
   Search, 
   Gauge, 
   Server, 
-  Settings 
+  Settings,
+  RotateCcw
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -33,6 +34,7 @@ export default function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
   const navItems = [
     { id: "transaction-builder", label: "Transaction Builder", icon: Play, section: "SIMULATION" },
+    { id: "transaction-replay", label: "Transaction Replay", icon: RotateCcw, section: "SIMULATION" },
     { id: "simulation-history", label: "Simulation History", icon: History, section: "SIMULATION" },
     { id: "bundle-simulator", label: "Bundle Simulator", icon: Link, section: "SIMULATION" },
     { id: "gas-profiler", label: "Gas Profiler", icon: BarChart3, section: "ANALYSIS" },

@@ -4,6 +4,9 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage.js";
 import { createHyperliquidService } from "./services/hyperliquid.js";
 import { SimulationService } from "./services/simulation.js";
+import { TransactionReplayService } from "./services/TransactionReplay.js";
+import { TransactionFormBuilder } from "./services/TransactionFormBuilder.js";
+import { HyperEVMStateManager } from "./core/StateManager.js";
 import { 
   simulationRequestSchema, 
   bundleSimulationSchema, 
@@ -18,6 +21,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize services
   const hyperliquidService = createHyperliquidService();
   const simulationService = new SimulationService(hyperliquidService);
+  
+  // Initialize state manager and replay services
+  const stateManager = new HyperEVMStateManager({
+    redis: {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT || '6379'),
+      password: process.env.REDIS_PASSWORD
+    },
+    rpcUrl: process.env.HYPERLIQUID_MAINNET_RPC || 'https://rpc.hyperliquid.xyz/evm',
+    cacheSize: 10000,
+    cacheTTL: 3600
+  });
+  
+  const replayService = new TransactionReplayService(hyperliquidService, simulationService, stateManager);
+  const formBuilder = new TransactionFormBuilder(hyperliquidService, replayService);
+  
+  // Initialize state manager
+  await stateManager.initialize();
 
   // WebSocket server for real-time updates
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
@@ -384,6 +405,379 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(500).json({ 
         error: "Failed to clear cache",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // ================================
+  // TRANSACTION REPLAY ENDPOINTS
+  // ================================
+
+  // Create simulation form from transaction hash
+  app.post("/api/v1/replay/create-form", async (req, res) => {
+    try {
+      const { transactionHash } = req.body;
+      
+      if (!transactionHash || typeof transactionHash !== 'string') {
+        return res.status(400).json({ 
+          error: "Transaction hash is required",
+          message: "Please provide a valid transaction hash"
+        });
+      }
+
+      // Validate transaction hash format
+      if (!/^0x[a-fA-F0-9]{64}$/.test(transactionHash)) {
+        return res.status(400).json({ 
+          error: "Invalid transaction hash format",
+          message: "Transaction hash must be a 66-character hex string"
+        });
+      }
+
+      const form = await formBuilder.createSimulationForm(transactionHash);
+      
+      broadcast({
+        type: 'form_created',
+        data: {
+          formId: form.formId,
+          transactionHash: form.transactionHash,
+          title: form.title
+        }
+      });
+
+      res.json({
+        success: true,
+        data: form
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Failed to create simulation form",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Replay transaction on forked mainnet
+  app.post("/api/v1/replay/execute", async (req, res) => {
+    try {
+      const replayRequest = req.body;
+      
+      if (!replayRequest.transactionHash) {
+        return res.status(400).json({ 
+          error: "Transaction hash is required",
+          message: "Please provide a valid transaction hash to replay"
+        });
+      }
+
+      const result = await replayService.replayTransaction(replayRequest);
+      
+      broadcast({
+        type: 'replay_complete',
+        data: {
+          requestId: result.requestId,
+          transactionHash: result.originalTransaction.hash,
+          accuracy: result.insights.replayAccuracy
+        }
+      });
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Transaction replay failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get simulation form by ID
+  app.get("/api/v1/replay/forms/:formId", async (req, res) => {
+    try {
+      const { formId } = req.params;
+      const form = formBuilder.getForm(formId);
+      
+      if (!form) {
+        return res.status(404).json({ 
+          error: "Form not found",
+          message: `No simulation form found with ID: ${formId}`
+        });
+      }
+
+      res.json({
+        success: true,
+        data: form
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch form",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get all simulation forms
+  app.get("/api/v1/replay/forms", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const forms = formBuilder.getAllForms().slice(0, limit);
+      
+      res.json({
+        success: true,
+        data: forms,
+        count: forms.length
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch forms",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get replay result by request ID
+  app.get("/api/v1/replay/results/:requestId", async (req, res) => {
+    try {
+      const { requestId } = req.params;
+      const result = replayService.getReplayResult(requestId);
+      
+      if (!result) {
+        return res.status(404).json({ 
+          error: "Replay result not found",
+          message: `No replay result found with ID: ${requestId}`
+        });
+      }
+
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch replay result",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Create mainnet fork
+  app.post("/api/v1/replay/forks", async (req, res) => {
+    try {
+      const { blockNumber, preserveContracts = true } = req.body;
+      
+      if (!blockNumber) {
+        return res.status(400).json({ 
+          error: "Block number is required",
+          message: "Please specify the block number to fork from"
+        });
+      }
+
+      const fork = await replayService.createMainnetFork(blockNumber);
+      
+      broadcast({
+        type: 'fork_created',
+        data: {
+          forkId: fork.forkId,
+          forkBlock: fork.forkBlock,
+          contractCount: fork.contractCount
+        }
+      });
+
+      res.json({
+        success: true,
+        data: {
+          forkId: fork.forkId,
+          forkBlock: fork.forkBlock,
+          forkStateRoot: fork.forkStateRoot,
+          contractCount: fork.contractCount,
+          createdAt: fork.createdAt
+        }
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Failed to create mainnet fork",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get active forks
+  app.get("/api/v1/replay/forks", async (req, res) => {
+    try {
+      const forks = replayService.getActiveForks();
+      
+      res.json({
+        success: true,
+        data: forks,
+        count: forks.length
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch forks",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Delete fork
+  app.delete("/api/v1/replay/forks/:forkId", async (req, res) => {
+    try {
+      const { forkId } = req.params;
+      const deleted = await replayService.deleteFork(forkId);
+      
+      if (!deleted) {
+        return res.status(404).json({ 
+          error: "Fork not found",
+          message: `No fork found with ID: ${forkId}`
+        });
+      }
+
+      broadcast({
+        type: 'fork_deleted',
+        data: { forkId }
+      });
+
+      res.json({
+        success: true,
+        message: "Fork deleted successfully"
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to delete fork",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get transaction details by hash (helper endpoint)
+  app.get("/api/v1/replay/transaction/:txHash", async (req, res) => {
+    try {
+      const { txHash } = req.params;
+      
+      console.log(`[Routes] Getting transaction details for: ${txHash}`);
+      
+      const [transaction, receipt] = await Promise.all([
+        hyperliquidService.getTransactionByHash(txHash),
+        hyperliquidService.getTransactionReceipt(txHash)
+      ]);
+
+      if (!transaction) {
+        return res.status(404).json({ 
+          error: "Transaction not found",
+          message: `No transaction found with hash: ${txHash}. Please verify the transaction exists on HyperEVM.`
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          transaction,
+          receipt
+        }
+      });
+    } catch (error) {
+      console.error(`[Routes] Transaction fetch error for ${req.params.txHash}:`, error);
+      res.status(400).json({ 
+        error: "Failed to fetch transaction",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Debug endpoint to test RPC connectivity
+  app.get("/api/v1/debug/rpc-test", async (req, res) => {
+    try {
+      console.log('[Debug] Testing HyperEVM RPC connectivity...');
+      
+      const [chainId, blockNumber, gasPrice] = await Promise.all([
+        hyperliquidService.getChainId().catch(err => ({ error: err.message })),
+        hyperliquidService.getBlockNumber().catch(err => ({ error: err.message })),
+        hyperliquidService.getGasPrice().catch(err => ({ error: err.message }))
+      ]);
+
+      const rpcConfig = {
+        rpcUrl: process.env.HYPERLIQUID_MAINNET_RPC || 'https://rpc.hyperliquid.xyz/evm',
+        testRpcUrl: process.env.HYPERLIQUID_TESTNET_RPC || 'https://rpc.hyperliquid-testnet.xyz/evm'
+      };
+
+      res.json({
+        success: true,
+        rpcConfig,
+        testResults: {
+          chainId,
+          blockNumber, 
+          gasPrice
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('[Debug] RPC test failed:', error);
+      res.status(500).json({
+        success: false,
+        error: "RPC test failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Batch transaction analysis (for analyzing multiple related transactions)
+  app.post("/api/v1/replay/batch-analyze", async (req, res) => {
+    try {
+      const { transactionHashes } = req.body;
+      
+      if (!Array.isArray(transactionHashes) || transactionHashes.length === 0) {
+        return res.status(400).json({ 
+          error: "Transaction hashes array is required",
+          message: "Please provide an array of transaction hashes to analyze"
+        });
+      }
+
+      if (transactionHashes.length > 20) {
+        return res.status(400).json({ 
+          error: "Too many transactions",
+          message: "Maximum 20 transactions can be analyzed in a single batch"
+        });
+      }
+
+      const forms = await Promise.allSettled(
+        transactionHashes.map(hash => formBuilder.createSimulationForm(hash))
+      );
+
+      const results = forms.map((result, index) => ({
+        transactionHash: transactionHashes[index],
+        success: result.status === 'fulfilled',
+        data: result.status === 'fulfilled' ? result.value : null,
+        error: result.status === 'rejected' ? result.reason.message : null
+      }));
+
+      res.json({
+        success: true,
+        data: results,
+        successCount: results.filter(r => r.success).length,
+        totalCount: results.length
+      });
+    } catch (error) {
+      res.status(400).json({ 
+        error: "Batch analysis failed",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Get replay service statistics
+  app.get("/api/v1/replay/stats", async (req, res) => {
+    try {
+      const stats = replayService.getStats();
+      
+      res.json({
+        success: true,
+        data: stats
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch replay stats",
         message: error instanceof Error ? error.message : "Unknown error"
       });
     }
