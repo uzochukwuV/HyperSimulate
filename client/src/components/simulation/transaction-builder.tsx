@@ -147,6 +147,29 @@ export default function TransactionBuilder({ onSimulationComplete }: Transaction
         form.setValue("to", "");
         form.setValue("gasLimit", "2000000");
         break;
+      case "oracle_read":
+        form.setValue("to", "0x0000000000000000000000000000000000000807");
+        form.setValue("data", "0x0000000000000000000000000000000000000000000000000000000000000000"); // Asset index 0
+        form.setValue("gasLimit", "2100"); // 2000 + 65 * output_len
+        form.setValue("value", "0");
+        break;
+      case "core_writer":
+        form.setValue("to", "0x3333333333333333333333333333333333333333");
+        form.setValue("data", "0x01000001"); // Simplified CoreWriter action
+        form.setValue("gasLimit", "47000");
+        form.setValue("value", "0");
+        break;
+      case "hype_transfer":
+        form.setValue("to", "0x2222222222222222222222222222222222222222");
+        form.setValue("gasLimit", "21000");
+        form.setValue("value", "1000000000000000000"); // 1 HYPE
+        break;
+      case "perp_positions":
+        form.setValue("to", "0x0000000000000000000000000000000000000801");
+        form.setValue("data", "0x742d35cc6634c0532925a3b8d40c6f25a8b8d40c6f25a8b8d40c6f25a8b8d40c"); // User address
+        form.setValue("gasLimit", "2100");
+        form.setValue("value", "0");
+        break;
     }
   };
 
@@ -362,7 +385,7 @@ export default function TransactionBuilder({ onSimulationComplete }: Transaction
             <Card className="bg-hyper-dark border-hyper-dark-border">
               <CardContent className="p-4">
                 <h4 className="text-sm font-medium text-hyper-grey mb-3">Quick Actions</h4>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   <Button
                     type="button"
                     variant="outline"
@@ -377,31 +400,65 @@ export default function TransactionBuilder({ onSimulationComplete }: Transaction
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => loadQuickTemplate("uniswap")}
-                    className="border-hyper-dark-border hover:border-hyper-teal text-xs"
-                    data-testid="button-template-uniswap"
-                  >
-                    Uniswap Swap
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
                     onClick={() => loadQuickTemplate("deploy")}
                     className="border-hyper-dark-border hover:border-hyper-teal text-xs"
                     data-testid="button-template-deploy"
                   >
                     Contract Deploy
                   </Button>
+                </div>
+                
+                <h4 className="text-sm font-medium text-hyper-teal mb-3">HyperEVM Precompiles</h4>
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="border-hyper-dark-border hover:border-hyper-teal text-xs"
-                    data-testid="button-template-custom"
+                    onClick={() => loadQuickTemplate("oracle_read")}
+                    className="border-hyper-teal hover:bg-hyper-teal hover:text-hyper-dark text-xs"
+                    data-testid="button-template-oracle"
                   >
-                    Custom Call
+                    📊 Oracle Price
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadQuickTemplate("core_writer")}
+                    className="border-hyper-teal hover:bg-hyper-teal hover:text-hyper-dark text-xs"
+                    data-testid="button-template-corewriter"
+                  >
+                    ✍️ CoreWriter
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadQuickTemplate("hype_transfer")}
+                    className="border-hyper-teal hover:bg-hyper-teal hover:text-hyper-dark text-xs"
+                    data-testid="button-template-hype"
+                  >
+                    💰 HYPE Transfer
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => loadQuickTemplate("perp_positions")}
+                    className="border-hyper-teal hover:bg-hyper-teal hover:text-hyper-dark text-xs"
+                    data-testid="button-template-perp"
+                  >
+                    📈 Perp Positions
+                  </Button>
+                </div>
+
+                <div className="text-xs text-hyper-grey mt-2 p-2 bg-hyper-dark-lighter rounded border border-hyper-dark-border">
+                  <strong>💡 Pro Tip:</strong> HyperEVM precompiles have specific gas costs:
+                  <ul className="mt-1 space-y-1">
+                    <li>• Oracle reads: 2000 + 65 × output_len gas</li>
+                    <li>• CoreWriter: ~47,000 gas + 3sec delay</li>
+                    <li>• HYPE transfers: 21,000 gas</li>
+                  </ul>
                 </div>
               </CardContent>
             </Card>

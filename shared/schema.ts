@@ -54,10 +54,12 @@ export const transactionSchema = z.object({
 export const simulationRequestSchema = z.object({
   transaction: transactionSchema,
   blockNumber: z.string().default("latest"),
-  enableStateOverrides: z.boolean().default(false),
+  enableStateOverrides: z.boolean().optional(),
   simulationMode: z.enum(["fast", "large"]).default("fast"),
-  includePrecompiles: z.boolean().default(false),
+  includePrecompiles: z.boolean().optional(),
   simulateCoreWriter: z.boolean().default(false),
+  // Step 2: Add executionMode to schema
+  executionMode: z.enum(["rpc", "local", "hybrid"]).default("rpc"),
 });
 
 export const bundleSimulationSchema = z.object({

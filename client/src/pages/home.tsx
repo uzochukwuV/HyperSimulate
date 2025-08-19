@@ -2,11 +2,12 @@ import { useState } from "react";
 import Header from "@/components/layout/header";
 import Sidebar from "@/components/layout/sidebar";
 import TransactionBuilder from "@/components/simulation/transaction-builder";
+import TransactionReplay from "@/components/simulation/transaction-replay";
 import SimulationResults from "@/components/simulation/simulation-results";
 import AdminDashboard from "@/components/admin/dashboard";
 import ApiEndpoints from "@/components/admin/api-endpoints";
 
-type ActiveView = "transaction-builder" | "simulation-history" | "bundle-simulator" | "gas-profiler" | "event-decoder" | "state-inspector" | "dashboard" | "system-health" | "configuration";
+type ActiveView = "transaction-builder" | "transaction-replay" | "simulation-history" | "bundle-simulator" | "gas-profiler" | "event-decoder" | "state-inspector" | "dashboard" | "system-health" | "configuration";
 
 export default function Home() {
   const [activeView, setActiveView] = useState<ActiveView>("transaction-builder");
@@ -18,6 +19,13 @@ export default function Home() {
         return (
           <div className="space-y-8">
             <TransactionBuilder onSimulationComplete={setLastSimulationResult} />
+            {lastSimulationResult && <SimulationResults result={lastSimulationResult} />}
+          </div>
+        );
+      case "transaction-replay":
+        return (
+          <div className="space-y-8">
+            <TransactionReplay onReplayComplete={setLastSimulationResult} />
             {lastSimulationResult && <SimulationResults result={lastSimulationResult} />}
           </div>
         );
